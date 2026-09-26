@@ -1,11 +1,13 @@
-import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import Database from 'better-sqlite3';
+import { migrate, type MigrateResult } from './migrations.js';
 
 export type EntrySource = 'text' | 'slash';
 
 export interface Entry {
   id: number;
   userId: string;
+  /** Signed NTD: expense < 0, income > 0. Never 0. */
   amount: number;
   note: string;
   source: EntrySource;
@@ -57,13 +59,22 @@ function toEntry(row: EntryRow): Entry {
   };
 }
 
-const SCHEMA_URL = new URL('./schema.sql', import.meta.url);
+export interface OpenDatabaseOptions {
+  /** Called when migrations ran, e.g. to log them. */
+  onMigrated?: (result: MigrateResult) => void;
+}
 
-export function openDatabase(path: string): Database.Database {
+/**
+ * Opens the database and applies pending migrations. File databases are
+ * snapshotted to <db dir>/backups/ before a migration touches existing data.
+ */
+export function openDatabase(path: string, options: OpenDatabaseOptions = {}): Database.Database {
   const db = new Database(path);
   db.pragma('journal_mode = WAL');
   db.pragma('foreign_keys = ON');
-  db.exec(readFileSync(SCHEMA_URL, 'utf8'));
+  const inMemory = path === ':memory:' || path === '';
+  const result = migrate(db, inMemory ? {} : { backupDir: join(dirname(path), 'backups') });
+  if (result.applied.length > 0) options.onMigrated?.(result);
   return db;
 }
 

@@ -2,17 +2,44 @@ import { DateTime } from 'luxon';
 import type { Entry } from '../db/repository.js';
 import type { DaySummary, LogResult, WeeklyReport, WeekSummary } from './ledger.js';
 import { MAX_AMOUNT } from './parse.js';
+import { normalizeNote, type SpendingGroup, type Totals } from './stats.js';
 
 // Plain-text formatting for replies and reports. Keep replies short: the bot should not nag.
+// Discord uses a proportional font, so never pad with spaces to align columns.
 
-const money = (n: number) => n.toLocaleString('en-US');
+const digits = (n: number) => Math.abs(n).toLocaleString('en-US');
+
+/** Signed money: expense `-$1,200`, income `+$500`, zero `$0`. ASCII signs only. */
+export function formatMoney(amount: number): string {
+  if (amount < 0) return `-$${digits(amount)}`;
+  if (amount > 0) return `+$${digits(amount)}`;
+  return '$0';
+}
 
 function item(e: Entry): string {
-  return e.note ? `${e.note} -${money(e.amount)}` : `-${money(e.amount)}`;
+  const note = normalizeNote(e.note);
+  return note ? `${note} ${formatMoney(e.amount)}` : formatMoney(e.amount);
 }
 
 function entries(n: number): string {
   return n === 1 ? '1 entry' : `${n} entries`;
+}
+
+/** `5 entries · Spent -$2,383`, plus Earned/Net only when there is income. */
+export function formatTotals(t: Totals): string {
+  const parts = [entries(t.count), `Spent ${formatMoney(t.spent)}`];
+  if (t.earned > 0) parts.push(`Earned ${formatMoney(t.earned)}`, `Net ${formatMoney(t.net)}`);
+  return parts.join(' · ');
+}
+
+export function formatSpendingGroup(g: SpendingGroup): string {
+  const label = g.note || '(no note)';
+  const times = g.count > 1 ? ` ×${g.count}` : '';
+  return `${label}${times} ${formatMoney(g.total)}`;
+}
+
+function topSpendingSection(groups: SpendingGroup[]): string[] {
+  return groups.length ? ['', 'Top spending', ...groups.map(formatSpendingGroup)] : [];
 }
 
 export function formatLogResult(result: LogResult): string {
@@ -20,9 +47,9 @@ export function formatLogResult(result: LogResult): string {
   switch (result.reason) {
     case 'empty':
     case 'no_amount':
-      return 'No amount found. Try `午餐 -120`.';
+      return 'No amount found. Try `午餐 -120` or `薪水 +500`.';
     case 'invalid_amount':
-      return `Amount must be 1–${money(MAX_AMOUNT)} (expenses only).`;
+      return `Amount must be $1–$${digits(MAX_AMOUNT)}.`;
   }
 }
 
@@ -31,15 +58,11 @@ export function formatUndo(entry: Entry | null): string {
 }
 
 export function formatToday(summary: DaySummary, tz: string): string {
-  if (summary.count === 0) return 'Today: nothing logged yet.';
+  if (summary.totals.count === 0) return 'Today: nothing logged yet.';
   const lines = summary.entries.map(
-    (e) => `\`${DateTime.fromISO(e.createdAt).setZone(tz).toFormat('HH:mm')}\` ${item(e)}`,
+    (e) => `${DateTime.fromISO(e.createdAt).setZone(tz).toFormat('HH:mm')} ${item(e)}`,
   );
-  return [`Today: ${entries(summary.count)}, ${money(summary.total)}`, ...lines].join('\n');
-}
-
-function topLine(top: Entry[]): string[] {
-  return top.length ? [`Top: ${top.map(item).join(' · ')}`] : [];
+  return [`Today: ${formatTotals(summary.totals)}`, '', ...lines].join('\n');
 }
 
 function weekLabel(week: WeekSummary, tz: string): string {
@@ -49,25 +72,28 @@ function weekLabel(week: WeekSummary, tz: string): string {
 }
 
 export function formatWeek(week: WeekSummary, tz: string): string {
-  if (week.count === 0) return `This week (${weekLabel(week, tz)}): nothing logged yet.`;
-  return [
-    `This week (${weekLabel(week, tz)}): ${entries(week.count)}, ${money(week.total)}`,
-    ...topLine(week.top),
-  ].join('\n');
+  const header = `This week (${weekLabel(week, tz)})`;
+  if (week.totals.count === 0) return `${header}\nNothing logged yet.`;
+  return [header, formatTotals(week.totals), ...topSpendingSection(week.topSpending)].join('\n');
+}
+
+/**
+ * Compares spending only. Change = this week's spent - last week's spent, in the
+ * same sign convention: negative means more money went out this week.
+ */
+export function formatSpendingComparison(current: Totals, previous: Totals): string {
+  if (previous.spent === 0) return 'Last week: no spending';
+  const change = current.spent - previous.spent;
+  const direction = change < 0 ? ' (spent more)' : change > 0 ? ' (spent less)' : '';
+  return `Last week: Spent ${formatMoney(previous.spent)} · Change ${formatMoney(change)}${direction}`;
 }
 
 export function formatWeeklyReport(report: WeeklyReport, tz: string): string {
-  const diff = report.difference;
-  const comparison =
-    report.previousTotal === 0
-      ? 'no entries last week'
-      : diff === 0
-        ? `same as last week (${money(report.previousTotal)})`
-        : `${diff > 0 ? '+' : '-'}${money(Math.abs(diff))} vs last week (${money(report.previousTotal)})`;
   return [
     `**Weekly report ${weekLabel(report, tz)}**`,
-    `${money(report.total)} across ${entries(report.count)}, ${comparison}`,
-    ...topLine(report.top),
+    report.totals.count === 0 ? 'Nothing logged this week.' : formatTotals(report.totals),
+    formatSpendingComparison(report.totals, report.previousTotals),
+    ...topSpendingSection(report.topSpending),
   ].join('\n');
 }
 
@@ -81,7 +107,10 @@ function csvField(value: string | number): string {
   return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
-/** CSV with a UTF-8 BOM so Excel opens Chinese notes correctly. */
+/**
+ * CSV with a UTF-8 BOM so Excel opens Chinese notes correctly. `amount` stays a
+ * plain signed integer (expense < 0) so it can be summed in a spreadsheet.
+ */
 export function toCsv(rows: Entry[], tz: string): string {
   const header = ['id', 'local_time', 'amount', 'note', 'source', 'created_at_utc'];
   const lines = rows.map((e) =>

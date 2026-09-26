@@ -29,14 +29,14 @@ beforeEach(() => {
 });
 
 describe('Ledger.log', () => {
-  it('parses and stores the entry with a UTC timestamp', async () => {
+  it('stores expenses as negative amounts with a UTC timestamp', async () => {
     const result = await ledger.log(USER, '午餐 -120', 'slash');
     expect(result).toEqual({
       ok: true,
       entry: {
         id: 1,
         userId: USER,
-        amount: 120,
+        amount: -120,
         note: '午餐',
         source: 'slash',
         createdAt: '2026-09-26T04:00:00.000Z',
@@ -46,7 +46,20 @@ describe('Ledger.log', () => {
 
   it('returns the parse error without writing', async () => {
     expect(await ledger.log(USER, '今天好累', 'text')).toEqual({ ok: false, reason: 'no_amount' });
+    expect(await ledger.log(USER, '+0 薪水', 'text')).toEqual({
+      ok: false,
+      reason: 'invalid_amount',
+    });
     expect(await ledger.all(USER)).toEqual([]);
+  });
+
+  it('stores income as a positive amount', async () => {
+    const result = await ledger.log(USER, '+50,000 薪水', 'slash');
+    expect(result).toMatchObject({
+      ok: true,
+      entry: { amount: 50_000, note: '薪水', source: 'slash' },
+    });
+    expect((await ledger.all(USER)).map((e) => e.amount)).toEqual([50_000]);
   });
 });
 
@@ -56,7 +69,7 @@ describe('Ledger.undo', () => {
     const last = await logAt('2026-09-26T13:00:00+08:00', '-85 飲料');
 
     expect(await ledger.undo(USER)).toEqual(last);
-    expect(await ledger.today(USER)).toMatchObject({ count: 1, total: 120 });
+    expect((await ledger.today(USER)).totals).toMatchObject({ count: 1, spent: -120 });
     expect((await ledger.all(USER)).map((e) => e.note)).toEqual(['午餐']);
   });
 
@@ -75,13 +88,26 @@ describe('Ledger.today', () => {
 
     setNow('2026-09-26T22:00:00+08:00');
     const today = await ledger.today(USER);
-    expect(today.count).toBe(2);
-    expect(today.total).toBe(190);
+    expect(today.totals).toEqual({ count: 2, spent: -190, earned: 0, net: -190 });
     expect(today.entries.map((e) => e.note)).toEqual(['宵夜今天', '午餐']);
     expect(await ledger.hasEntryToday(USER)).toBe(true);
 
     setNow('2026-09-27T22:00:00+08:00');
     expect(await ledger.hasEntryToday(USER)).toBe(false);
+  });
+
+  it('includes income in totals and in the reminder check', async () => {
+    await logAt('2026-09-26T09:00:00+08:00', '+500 發票中獎');
+    setNow('2026-09-26T22:00:00+08:00');
+    expect(await ledger.hasEntryToday(USER)).toBe(true);
+
+    await logAt('2026-09-26T12:00:00+08:00', '-120 午餐');
+    expect((await ledger.today(USER)).totals).toEqual({
+      count: 2,
+      spent: -120,
+      earned: 500,
+      net: 380,
+    });
   });
 });
 
@@ -100,34 +126,33 @@ describe('Ledger.week / weeklyReport', () => {
     await logAt('2026-09-28T00:00:00+08:00', '-999 下週');
   });
 
-  it('summarizes the Monday-based week with the top three entries', async () => {
+  it('summarizes the Monday-based week with top spending by note', async () => {
+    await logAt('2026-09-25T12:00:00+08:00', '-250 a');
+    await logAt('2026-09-25T13:00:00+08:00', '耳機 +5,000'); // resold; income never ranks
     setNow('2026-09-27T21:00:00+08:00');
     const week = await ledger.week(USER);
-    expect(week.count).toBe(5);
-    expect(week.total).toBe(1950);
-    expect(week.top.map((e) => e.note)).toEqual(['耳機', 'b', 'c']);
+    expect(week.totals).toEqual({ count: 7, spent: -2200, earned: 5000, net: 2800 });
+    expect(week.topSpending.map((g) => [g.note, g.total, g.count])).toEqual([
+      ['耳機', -1200, 1],
+      ['a', -350, 2],
+      ['c', -300, 1], // ties with b on total and count; c (9/24) is more recent
+    ]);
   });
 
   it('compares against the previous week', async () => {
     setNow('2026-09-27T21:00:00+08:00');
     const report = await ledger.weeklyReport(USER);
-    expect(report).toMatchObject({
-      count: 5,
-      total: 1950,
-      previousTotal: 800,
-      difference: 1150,
-    });
+    expect(report.totals).toMatchObject({ count: 5, spent: -1950 });
+    expect(report.previousTotals).toEqual({ count: 2, spent: -800, earned: 0, net: -800 });
   });
 
   it('handles an empty week', async () => {
     setNow('2026-10-12T21:00:00+08:00');
     expect(await ledger.weeklyReport(USER)).toEqual({
       range: { start: '2026-10-11T16:00:00.000Z', end: '2026-10-18T16:00:00.000Z' },
-      count: 0,
-      total: 0,
-      top: [],
-      previousTotal: 0,
-      difference: 0,
+      totals: { count: 0, spent: 0, earned: 0, net: 0 },
+      topSpending: [],
+      previousTotals: { count: 0, spent: 0, earned: 0, net: 0 },
     });
   });
 });

@@ -8,7 +8,7 @@ const OTHER = '999999999999999999';
 function entry(overrides: Partial<NewEntry> = {}): NewEntry {
   return {
     userId: USER,
-    amount: 120,
+    amount: -120,
     note: '午餐',
     source: 'text',
     createdAt: '2026-09-26T04:00:00.000Z',
@@ -31,7 +31,9 @@ describe('SqliteEntryRepository', () => {
     expect(await repo.listAll(USER)).toEqual([saved]);
   });
 
-  it('enforces positive amounts at the database level', async () => {
+  it('stores signed amounts and rejects zero at the database level', async () => {
+    await repo.insert(entry({ amount: 500, note: 'income' }));
+    expect((await repo.listAll(USER)).map((e) => e.amount)).toEqual([500]);
     await expect(repo.insert(entry({ amount: 0 }))).rejects.toThrow(/CHECK/);
   });
 

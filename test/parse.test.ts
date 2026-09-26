@@ -10,7 +10,7 @@ describe('parseEntry', () => {
     ['-120元 早餐', 120, '早餐'],
     ['-１２０ 午餐', 120, '午餐'],
   ])('parses HANDOFF example %j', (input, amount, note) => {
-    expect(parseEntry(input)).toEqual({ ok: true, amount, note });
+    expect(parseEntry(input)).toEqual({ ok: true, amount: -amount, note });
   });
 
   it.each([
@@ -18,33 +18,33 @@ describe('parseEntry', () => {
     ['午餐 120', 120, '午餐'],
     ['午餐 120元', 120, '午餐'],
   ])('accepts amounts without a minus sign: %j', (input, amount, note) => {
-    expect(parseEntry(input)).toEqual({ ok: true, amount, note });
+    expect(parseEntry(input)).toEqual({ ok: true, amount: -amount, note });
   });
 
   it('handles full-width minus, comma and spaces', () => {
-    expect(parseEntry('－１，２００　耳機')).toEqual({ ok: true, amount: 1200, note: '耳機' });
-    expect(parseEntry('−120 午餐')).toEqual({ ok: true, amount: 120, note: '午餐' });
+    expect(parseEntry('－１，２００　耳機')).toEqual({ ok: true, amount: -1200, note: '耳機' });
+    expect(parseEntry('−120 午餐')).toEqual({ ok: true, amount: -120, note: '午餐' });
   });
 
   it('collapses extra whitespace and keeps multi-word notes', () => {
     expect(parseEntry('  -120   午餐   便當  ')).toEqual({
       ok: true,
-      amount: 120,
+      amount: -120,
       note: '午餐 便當',
     });
   });
 
   it('keeps digits inside the note', () => {
-    expect(parseEntry('-50 7-11 咖啡')).toEqual({ ok: true, amount: 50, note: '7-11 咖啡' });
-    expect(parseEntry('2 杯咖啡 -130')).toEqual({ ok: true, amount: 130, note: '2 杯咖啡' });
+    expect(parseEntry('-50 7-11 咖啡')).toEqual({ ok: true, amount: -50, note: '7-11 咖啡' });
+    expect(parseEntry('2 杯咖啡 -130')).toEqual({ ok: true, amount: -130, note: '2 杯咖啡' });
   });
 
   it('prefers the first token when both ends are unsigned amounts', () => {
-    expect(parseEntry('120 午餐 2')).toEqual({ ok: true, amount: 120, note: '午餐 2' });
+    expect(parseEntry('120 午餐 2')).toEqual({ ok: true, amount: -120, note: '午餐 2' });
   });
 
   it('allows an amount without a note', () => {
-    expect(parseEntry('-120')).toEqual({ ok: true, amount: 120, note: '' });
+    expect(parseEntry('-120')).toEqual({ ok: true, amount: -120, note: '' });
   });
 
   it('rejects empty input', () => {
@@ -60,10 +60,37 @@ describe('parseEntry', () => {
     expect(parseEntry('-1200,0 午餐')).toEqual({ ok: false, reason: 'no_amount' });
   });
 
-  it('rejects zero, income and oversized amounts', () => {
+  it('rejects zero and oversized amounts', () => {
     expect(parseEntry('-0 午餐')).toEqual({ ok: false, reason: 'invalid_amount' });
-    expect(parseEntry('+500 薪水')).toEqual({ ok: false, reason: 'invalid_amount' });
-    expect(parseEntry('-10,000,000 車')).toEqual({ ok: true, amount: 10_000_000, note: '車' });
+    expect(parseEntry('-10,000,000 車')).toEqual({ ok: true, amount: -10_000_000, note: '車' });
     expect(parseEntry('-10,000,001 車')).toEqual({ ok: false, reason: 'invalid_amount' });
+  });
+
+  describe('income', () => {
+    it.each([
+      ['+500 薪水', 500, '薪水'],
+      ['薪水 +500', 500, '薪水'],
+      ['+1,200 獎金', 1200, '獎金'],
+      ['+50,000元 年終', 50_000, '年終'],
+      ['＋５００ 發票中獎', 500, '發票中獎'],
+      ['+500', 500, ''],
+    ])('parses %j as income', (input, amount, note) => {
+      expect(parseEntry(input)).toEqual({ ok: true, amount, note });
+    });
+
+    it('applies the same limits as expenses', () => {
+      expect(parseEntry('+0 薪水')).toEqual({ ok: false, reason: 'invalid_amount' });
+      expect(parseEntry('+10,000,000 x')).toEqual({ ok: true, amount: 10_000_000, note: 'x' });
+      expect(parseEntry('+10,000,001 x')).toEqual({ ok: false, reason: 'invalid_amount' });
+    });
+
+    it('prefers an explicitly signed end over an unsigned one', () => {
+      expect(parseEntry('2 張發票 +400')).toEqual({ ok: true, amount: 400, note: '2 張發票' });
+    });
+
+    it('takes the first end when both are signed', () => {
+      expect(parseEntry('+500 退款 -100')).toEqual({ ok: true, amount: 500, note: '退款 -100' });
+      expect(parseEntry('-100 找零 +500')).toEqual({ ok: true, amount: -100, note: '找零 +500' });
+    });
   });
 });

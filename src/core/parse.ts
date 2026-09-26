@@ -1,4 +1,5 @@
 export type ParseResult =
+  /** `amount` is signed: expenses are negative, income positive. */
   | { ok: true; amount: number; note: string }
   | { ok: false; reason: 'empty' | 'no_amount' | 'invalid_amount' };
 
@@ -26,8 +27,9 @@ function matchAmount(token: string, index: number): AmountToken | null {
 }
 
 /**
- * Parse free-form input such as "-120 午餐", "午餐 -120" or "-1,200 耳機".
+ * Parse free-form input such as "-120 午餐", "午餐 -120" or "+500 薪水".
  * The amount must be the first or last token; everything else becomes the note.
+ * "+" marks income; "-" or no sign is an expense.
  */
 export function parseEntry(input: string): ParseResult {
   const text = normalize(input);
@@ -37,17 +39,15 @@ export function parseEntry(input: string): ParseResult {
   const first = matchAmount(tokens[0] ?? '', 0);
   const last = tokens.length > 1 ? matchAmount(tokens.at(-1) ?? '', tokens.length - 1) : null;
 
-  // When both ends look like amounts, prefer the explicitly signed one, then the first.
+  // When both ends look like amounts, prefer an explicitly signed one, then the first.
   const candidates = [first, last].filter((c): c is AmountToken => c !== null);
-  const picked = candidates.find((c) => c.sign === '-') ?? candidates[0];
+  const picked = candidates.find((c) => c.sign !== '') ?? candidates[0];
   if (!picked) return { ok: false, reason: 'no_amount' };
 
-  // Income ("+") is out of MVP scope.
-  if (picked.sign === '+') return { ok: false, reason: 'invalid_amount' };
   if (picked.value <= 0 || picked.value > MAX_AMOUNT) {
     return { ok: false, reason: 'invalid_amount' };
   }
 
   const note = tokens.filter((_, i) => i !== picked.index).join(' ');
-  return { ok: true, amount: picked.value, note };
+  return { ok: true, amount: picked.sign === '+' ? picked.value : -picked.value, note };
 }

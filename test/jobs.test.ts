@@ -61,7 +61,14 @@ describe('runWeeklyReport', () => {
     const notify = vi.fn().mockResolvedValue(undefined);
     await runWeeklyReport(ctx, notify);
     expect(notify).toHaveBeenCalledWith(
-      '**Weekly report 9/21–9/27**\n1,200 across 1 entry, no entries last week\nTop: 耳機 -1,200',
+      [
+        '**Weekly report 9/21–9/27**',
+        '1 entry · Spent -$1,200',
+        'Last week: no spending',
+        '',
+        'Top spending',
+        '耳機 -$1,200',
+      ].join('\n'),
     );
   });
 });
@@ -106,7 +113,7 @@ describe('backups', () => {
     const repo = new SqliteEntryRepository(db);
     await repo.insert({
       userId: OWNER,
-      amount: 120,
+      amount: -120,
       note: '午餐',
       source: 'text',
       createdAt: '2026-09-27T04:00:00.000Z',

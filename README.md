@@ -11,28 +11,89 @@
 ```
 午餐 -120
 -1,200 耳機
-120 早餐          ← 負號可省略
+120 早餐          ← 負號可省略（視為支出）
 -１２０ 飲料       ← 全形也可以
++500 薪水         ← + 開頭是收入
+薪水 +50,000
 ```
 
-- 成功：bot 回一行 `Logged 午餐 -120`
+- 支出用 `-` 或不帶符號，收入一定要加 `+`
+- 成功：bot 回一行 `Logged 午餐 -$120`、`Logged 薪水 +$500`
 - 看不出金額：bot 在你的訊息加上 ❓（不會回訊息打擾你）
-- 金額不合理（0、`+` 開頭的收入、超過 10,000,000）：回一行說明
+- 金額不合理（0 或超過 10,000,000）：回一行說明
 
 | 指令 | 說明 |
 |---|---|
 | `/log text:午餐 -120` | 同純文字輸入 |
 | `/undo` | 刪除最後一筆（軟刪除，資料庫仍保留） |
 | `/today` | 今天的每一筆與合計 |
-| `/week` | 本週合計、筆數、最大三筆 |
+| `/week` | 本週合計，與依備註加總的支出前三名（Top spending） |
 | `/export` | 下載全部紀錄 CSV（Excel 可直接開） |
 
 所有指令回覆都只有你看得到（ephemeral）。
 
+### 顯示格式
+
+`/today`：
+
+```
+Today: 5 entries · Spent -$2,383
+
+23:21 麥當勞 -$119
+23:22 麥當勞 -$119
+23:22 肯德基 -$162
+23:23 修腳踏車 -$1,750
+23:24 褲架 菜瓜布 抹布 -$233
+```
+
+有收入時，合計多出 `Earned` 和 `Net`：
+
+```
+Today: 3 entries · Spent -$238 · Earned +$500 · Net +$262
+
+12:05 麥當勞 -$119
+18:40 麥當勞 -$119
+20:00 發票中獎 +$500
+```
+
+`/week`：
+
+```
+This week (9/21–9/27)
+5 entries · Spent -$2,383
+
+Top spending
+修腳踏車 -$1,750
+麥當勞 ×2 -$238
+褲架 菜瓜布 抹布 -$233
+```
+
+週報多一行與上週**支出**的比較：
+
+```
+**Weekly report 9/21–9/27**
+5 entries · Spent -$2,383
+Last week: Spent -$1,200 · Change -$1,183 (spent more)
+
+Top spending
+...
+```
+
+規則：
+
+- **金額**：支出 `-$119`、收入 `+$500`（ASCII 的 `-`、`+`，有千分位）；合計也帶正負號。
+- **合計**：只有支出時顯示 `Spent`；有收入時才加上 `Earned` 和 `Net`，例如
+  `6 entries · Spent -$2,383 · Earned +$500 · Net -$1,883`。
+- **Top spending**：只計支出，依備註加總後取前三名。備註去掉頭尾空白、連續空白合併後完全相同才算同一項；
+  多筆時加 `×n`；沒有備註的歸為 `(no note)`。排序依支出金額 → 筆數 → 最近一筆的時間。
+- **Change**：本週支出減上週支出，沿用同樣的正負號：負數代表這週花得比較多。
+- 每項各佔一行；Discord 用比例字型，所以不用空格對齊。
+- `/export` 的 CSV 不套用以上格式，`amount` 是純數字的有號整數（支出為負），方便在 Excel 加總。
+
 排程（皆為台北時間）：
 
 - **每晚 22:00**：今天沒有任何紀錄時，在記帳頻道提醒並 mention 你
-- **週日 21:00**：週報（合計、筆數、最大三筆、與上週比較）
+- **週日 21:00**：週報（合計、Top spending、與上週支出比較）
 - **每天 04:00**：備份資料庫到 `data/backups/`，保留最近 14 份
 
 ## 預設值與設計決定
@@ -44,7 +105,8 @@
 | 週報時間 | 週日 21:00 | `WEEKLY_REPORT` |
 | 時區 | Asia/Taipei | `TIMEZONE`（不依賴容器 TZ） |
 | User Install | 不啟用 | 只註冊私人伺服器的 guild command |
-| 金額 | 新台幣整數，只記支出 | — |
+| 金額 | 新台幣整數；支出用 `-` 或不帶符號，收入用 `+` | — |
+| 資料表示 | `amount` 為有號整數：支出為負、收入為正，`SUM` 即淨額 | — |
 
 ## Discord Developer Portal 設定
 
@@ -146,6 +208,14 @@ npm run dev              # 啟動 bot（檔案變動會自動重啟）
   docker compose start
   ```
 
+### 資料庫 migration
+
+- schema 由 [src/db/migrations.ts](src/db/migrations.ts) 管理，**啟動時自動套用**，已套用的紀錄在 `schema_migrations` 資料表。
+- 套用前若資料庫裡已經有資料，會先存一份快照到 `data/backups/pre-migration-<時間>.db`。這類檔案不算在 14 份的自動清理裡，確認沒問題後可以自行刪除。
+- `002_signed_amounts`：把舊版的正數金額轉成負數（支出），限制條件改成 `amount != 0`。
+- 重複執行是安全的：每個 migration 和它的紀錄在同一個 transaction 裡，已套用的會跳過。
+- 新增 migration 時只能往後加，不要修改已套用的內容。
+
 ### 監控
 
 在 Uptime Kuma 建立 **Push** 類型的監控，心跳間隔設 60 秒，把 push 網址填進 `UPTIME_KUMA_PUSH_URL`。bot 斷線時不會送心跳，Uptime Kuma 就會通知。
@@ -159,8 +229,11 @@ src/
     parse.ts         「午餐 -120」→ { amount, note }
     period.ts        台北時間的今天／本週 → UTC 範圍
     ledger.ts        記帳、撤銷、查詢、統計
+    stats.ts         支出／收入／淨額合計、依備註分組的 Top spending
     format.ts        回覆、週報、CSV 文字格式
-  db/                SQLite schema 與 repository（介面為 async，方便將來換 D1）
+  db/
+    migrations.ts    schema 與 migration（啟動時自動套用）
+    repository.ts    repository 介面與 SQLite 實作（介面為 async，方便將來換 D1）
   discord/           client、訊息與指令處理、指令註冊
   jobs/              提醒、週報、備份、心跳排程
   index.ts           進入點

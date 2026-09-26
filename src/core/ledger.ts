@@ -1,29 +1,26 @@
 import type { Entry, EntryRepository, EntrySource } from '../db/repository.js';
 import { parseEntry, type ParseResult } from './parse.js';
 import { dayRange, previousWeekRange, toUtcIso, weekRange, type UtcRange } from './period.js';
+import { summarize, topSpending, type SpendingGroup, type Totals } from './stats.js';
 
 export type LogResult =
   { ok: true; entry: Entry } | { ok: false; reason: Extract<ParseResult, { ok: false }>['reason'] };
 
 export interface DaySummary {
-  count: number;
-  total: number;
+  totals: Totals;
   entries: Entry[];
 }
 
 export interface WeekSummary {
   /** The week's UTC range (Monday 00:00 local to next Monday 00:00 local). */
   range: UtcRange;
-  count: number;
-  total: number;
-  /** Largest entries this week, biggest first (ties: earliest first). */
-  top: Entry[];
+  totals: Totals;
+  /** Expenses grouped by note, biggest spending first. */
+  topSpending: SpendingGroup[];
 }
 
 export interface WeeklyReport extends WeekSummary {
-  previousTotal: number;
-  /** total - previousTotal */
-  difference: number;
+  previousTotals: Totals;
 }
 
 export interface LedgerOptions {
@@ -34,17 +31,7 @@ export interface LedgerOptions {
 
 const TOP_COUNT = 3;
 
-function sum(entries: Entry[]): number {
-  return entries.reduce((acc, e) => acc + e.amount, 0);
-}
-
-function largest(entries: Entry[], n: number): Entry[] {
-  return [...entries]
-    .sort((a, b) => b.amount - a.amount || a.createdAt.localeCompare(b.createdAt) || a.id - b.id)
-    .slice(0, n);
-}
-
-/** Business logic for logging and querying expenses. Knows nothing about Discord. */
+/** Business logic for logging and querying entries. Knows nothing about Discord. */
 export class Ledger {
   private readonly repo: EntryRepository;
   private readonly tz: string;
@@ -80,17 +67,18 @@ export class Ledger {
   async today(userId: string): Promise<DaySummary> {
     const { start, end } = dayRange(this.now(), this.tz);
     const entries = await this.repo.listBetween(userId, start, end);
-    return { count: entries.length, total: sum(entries), entries };
+    return { totals: summarize(entries), entries };
   }
 
+  /** Any entry counts, expense or income. */
   async hasEntryToday(userId: string): Promise<boolean> {
-    return (await this.today(userId)).count > 0;
+    return (await this.today(userId)).totals.count > 0;
   }
 
   async week(userId: string): Promise<WeekSummary> {
     const range = weekRange(this.now(), this.tz);
     const entries = await this.repo.listBetween(userId, range.start, range.end);
-    return { range, count: entries.length, total: sum(entries), top: largest(entries, TOP_COUNT) };
+    return { range, totals: summarize(entries), topSpending: topSpending(entries, TOP_COUNT) };
   }
 
   async weeklyReport(userId: string): Promise<WeeklyReport> {
@@ -99,8 +87,7 @@ export class Ledger {
       this.week(userId),
       this.repo.listBetween(userId, start, end),
     ]);
-    const previousTotal = sum(previous);
-    return { ...current, previousTotal, difference: current.total - previousTotal };
+    return { ...current, previousTotals: summarize(previous) };
   }
 
   async all(userId: string): Promise<Entry[]> {

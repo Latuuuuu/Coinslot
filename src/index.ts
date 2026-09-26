@@ -16,7 +16,12 @@ loadDotEnv();
 const config = loadConfig();
 
 mkdirSync(dirname(config.dbPath), { recursive: true });
-const db = openDatabase(config.dbPath);
+const db = openDatabase(config.dbPath, {
+  onMigrated: ({ applied, backupFile }) =>
+    log.info(
+      `Applied migrations ${applied.join(', ')}` + (backupFile ? `; backup: ${backupFile}` : ''),
+    ),
+});
 const ledger = new Ledger({
   repository: new SqliteEntryRepository(db),
   timezone: config.timezone,

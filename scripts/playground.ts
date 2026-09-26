@@ -2,6 +2,13 @@
 // Usage: npm run playground [-- <db path>]   (default: in-memory, nothing is saved)
 import { createInterface } from 'node:readline/promises';
 import { DateTime } from 'luxon';
+import {
+  formatLogResult,
+  formatToday,
+  formatUndo,
+  formatWeek,
+  formatWeeklyReport,
+} from '../src/core/format.js';
 import { Ledger } from '../src/core/ledger.js';
 import { parseEntry } from '../src/core/parse.js';
 import { dayRange, weekRange } from '../src/core/period.js';
@@ -25,7 +32,8 @@ const HELP = `Type an entry (e.g. "午餐 -120") to log it, or a command:
   /now <time>     pretend the current time is <time> (ISO, e.g. 2026-09-27T23:59+08:00)
   /now            back to the real clock
   /range          show today's and this week's UTC ranges
-  /undo /today /week /report /all
+  /undo /today /week /report   same output as Discord
+  /all            raw rows (signed amounts, UTC timestamps)
   /help /quit`;
 
 function taipei(iso: string): string {
@@ -70,24 +78,17 @@ async function handle(input: string): Promise<boolean> {
       console.log({ today: dayRange(now(), TZ), week: weekRange(now(), TZ) });
       return true;
     case '/undo': {
-      const removed = await ledger.undo(USER);
-      console.log(removed ? `Undone:\n${line(removed)}` : 'Nothing to undo.');
+      console.log(formatUndo(await ledger.undo(USER)));
       return true;
     }
-    case '/today': {
-      const t = await ledger.today(USER);
-      console.log(`Today: ${t.count} entries, total ${t.total}`);
-      t.entries.forEach((e) => console.log(line(e)));
+    case '/today':
+      console.log(formatToday(await ledger.today(USER), TZ));
       return true;
-    }
-    case '/week': {
-      const w = await ledger.week(USER);
-      console.log(`This week: ${w.count} entries, total ${w.total}. Top:`);
-      w.top.forEach((e) => console.log(line(e)));
+    case '/week':
+      console.log(formatWeek(await ledger.week(USER), TZ));
       return true;
-    }
     case '/report':
-      console.log(await ledger.weeklyReport(USER));
+      console.log(formatWeeklyReport(await ledger.weeklyReport(USER), TZ));
       return true;
     case '/all':
       (await ledger.all(USER)).forEach((e) => console.log(line(e)));
@@ -98,11 +99,7 @@ async function handle(input: string): Promise<boolean> {
         return true;
       }
       const result = await ledger.log(USER, input, 'text');
-      console.log(
-        result.ok
-          ? `Logged ${result.entry.note} -${result.entry.amount}`
-          : `Rejected: ${result.reason}`,
-      );
+      console.log(result.ok ? formatLogResult(result) : `Rejected: ${result.reason}`);
       return true;
     }
   }
