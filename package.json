@@ -1,0 +1,43 @@
+{
+  "name": "coinslot",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Personal expense-logging Discord bot. Spent it? Slot it.",
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json && node -e \"require('node:fs').cpSync('src/db/schema.sql','dist/db/schema.sql')\"",
+    "dev": "tsx watch src/index.ts",
+    "start": "node dist/index.js",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
+  },
+  "dependencies": {
+    "better-sqlite3": "^13.0.3",
+    "croner": "^10.0.1",
+    "discord.js": "^14.27.0",
+    "dotenv": "^18.0.4",
+    "luxon": "^3.7.2",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/better-sqlite3": "^9.6.0",
+    "@types/luxon": "^3.7.5",
+    "@types/node": "^24.19.0",
+    "eslint": "^10.11.0",
+    "eslint-config-prettier": "^10.1.8",
+    "globals": "^17.12.0",
+    "prettier": "^3.9.9",
+    "tsx": "^4.23.15",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.70.1",
+    "vitest": "^5.0.2"
+  }
+}
