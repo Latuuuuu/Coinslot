@@ -175,29 +175,59 @@ npm run dev              # 啟動 bot（檔案變動會自動重啟）
 2. 在 Proxmox 開一個**獨立的 LXC**（Debian 12 即可，1 核 / 512MB RAM / 4GB 硬碟足夠）。
    LXC 內要跑 Docker 需在 Options → Features 開啟 `nesting`（非特權容器另需 `keyctl`）。
 3. 在 LXC 內安裝 Docker 與 Compose plugin。
-4. 把程式碼放到 LXC（**不要放進社團共用的 repo**），例如 `/opt/coinslot`，並建立 `.env`：
+4. 把程式碼 clone 到 LXC（**不要放進社團共用的 repo**），並建立 `.env`：
 
    ```bash
+   git clone https://github.com/Latuuuuu/Coinslot.git /opt/coinslot
    cd /opt/coinslot
    cp .env.example .env && nano .env
    chmod 600 .env
    mkdir -p data && chown 1000:1000 data    # 容器以 uid 1000 執行
    ```
 
-5. 註冊指令並啟動：
+   repo 若是 private，建議在 LXC 產生 SSH key，加到 GitHub repo 的 **Settings → Deploy keys**（唯讀），
+   改用 `git@github.com:Latuuuuu/Coinslot.git` clone。
+
+5. 第一次啟動：
 
    ```bash
-   docker compose build
-   docker compose run --rm coinslot node dist/discord/register.js
-   docker compose up -d
-   docker compose logs -f     # 看到 "Logged in as Coinslot#xxxx" 即成功
+   ./deploy.sh --no-pull --force --register
    ```
 
-更新版本：`docker compose up -d --build`（指令有變動時先重跑上面的 register）。
+   看到 `OK Logged in as Coinslot#xxxx` 即成功。
+
+### 更新版本
+
+在本機 commit 並 push 到 GitHub 後，在 LXC 上：
+
+```bash
+cd /opt/coinslot
+./deploy.sh
+```
+
+`deploy.sh` 會依序：
+
+1. `git fetch`，沒有新 commit 就直接結束；伺服器上的檔案被改過會停下來，不會覆蓋
+2. `git merge --ff-only` 拉下新版本，列出這次更新的 commit
+3. 建置新映像檔（這段時間舊的 bot 還在運作）
+4. 停止 bot，把 `data/coinslot.db*` 複製到 `data/backups/manual-<時間>/`（保留最近 10 份）
+5. `src/discord/commands/` 有變動時自動重新註冊 slash commands
+6. 啟動 bot，等到 log 出現 `Logged in as` 才算成功；有 migration 會印出來
+7. 失敗時印出最近的 log 和**回復到上一版的指令**（含還原資料庫）
+
+| 選項 | 用途 |
+|---|---|
+| `--force` | 沒有新 commit 也重建、重啟 |
+| `--register` | 強制重新註冊 slash commands |
+| `--no-pull` | 不碰 git，直接部署目前的程式碼 |
+
+**資料不會因為更新而消失**：資料庫在 `data/`（掛進容器的 volume），不在映像檔也不在 git 裡。
+不要刪掉 `/opt/coinslot` 重新 clone，也不要把本機整個資料夾 rsync 過去（會用本機的 `data/`、`.env` 蓋掉伺服器上的）。
 
 ### 備份與還原
 
 - 每天 04:00 自動備份到 `data/backups/coinslot-YYYY-MM-DD.db`，保留 14 份。
+- 每次跑 `deploy.sh` 前會另外備份到 `data/backups/manual-<時間>/`，保留 10 份。
 - 社團 Proxmox 若有 vzdump 排程，這個 LXC 也會被備份到社團儲存空間。**是否排除請自行決定**（記帳資料會因此出現在社團儲存空間）。
 - 還原：
 
@@ -239,6 +269,7 @@ src/
   index.ts           進入點
 test/                單元測試（Vitest）
 scripts/playground.ts  終端機互動測試
+deploy.sh            伺服器上的更新腳本（pull → build → 備份 → 重啟 → 確認）
 ```
 
 將來若要搬到 Cloudflare Workers（HTTP Interactions），只需替換 `discord/`、`jobs/` 與 `db/` 的實作，`core/` 可以直接沿用。

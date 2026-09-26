@@ -9,3 +9,4 @@ coverage
 *.md
 test
 scripts
+deploy.sh

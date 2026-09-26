@@ -1,7 +1,7 @@
 # Coinslot 手動驗證指南
 
 > 最後更新：2026-09-26
-> 目前進度：HANDOFF 第 13 節步驟 1–9 已完成；金額為有號整數（支出負、收入正），可以用 `+` 記收入。
+> 目前進度：HANDOFF 第 13 節步驟 1–9 已完成；金額為有號整數（支出負、收入正），可以用 `+` 記收入；伺服器更新用 `deploy.sh`。
 > 第 1–4 節不需要 Discord 就能驗證；第 5 節以後需要先完成 README 的 Developer Portal 設定。
 
 所有指令都在專案根目錄 `/home/latuuu/DIT/Coinslot` 執行。
@@ -310,6 +310,29 @@ docker compose logs -f           # 看到 Logged in as ... 即成功，Ctrl+C �
 - `docker compose down` 停止
 
 若 log 出現 `SQLITE_CANTOPEN` 或 permission denied：`sudo chown 1000:1000 data`。
+
+### 8.1 用 `deploy.sh` 更新（在 LXC 上）
+
+```bash
+cd /opt/coinslot
+./deploy.sh --help     # 看選項
+./deploy.sh            # 更新
+```
+
+| 情境 | 預期 |
+|---|---|
+| GitHub 上沒有新 commit | `OK Already up to date: <hash> <訊息>`，bot 不會重啟 |
+| 有新 commit | 列出 `Incoming commits:`，依序 build → 停止 → 備份 → 啟動，最後 `OK Deployed ...` |
+| 這次的更新含 migration（例如第一次從正數金額升級） | 多印一行 `Applied migrations ...; backup: /data/backups/pre-migration-....db` |
+| `src/discord/commands/` 有改 | 出現 `Slash command definitions changed` 與 `Slash commands re-registered` |
+| 在伺服器上改過程式檔 | `FAIL tracked files were edited on the server ...`，什麼都不會動 |
+| build 失敗 | `WARN Build failed; the running bot was not touched.`，舊 bot 繼續運作，並印出回復指令 |
+| bot 啟動失敗（例如 token 錯） | `WARN The bot failed to start.`、最近的 log、回復指令（含還原資料庫） |
+
+更新後確認資料還在：
+
+- `ls data/backups/` 多一個 `manual-<時間>/`，裡面有 `coinslot.db`
+- Discord 上 `/today`、`/week` 仍看得到更新前的紀錄
 
 ## 9. 已知限制
 
