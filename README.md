@@ -207,7 +207,9 @@ cd /opt/coinslot
 
 `deploy.sh` 會依序：
 
-1. `git fetch`，沒有新 commit 就直接結束；伺服器上的檔案被改過會停下來，不會覆蓋
+1. `git fetch` 並拉下新 commit；伺服器上的檔案被改過會停下來，不會覆蓋。
+   接著比對**正在跑的容器**是用哪個 commit 建的（映像檔的 `coinslot.revision` 標籤），跟目前程式碼相同才直接結束。
+   所以就算先手動 `git pull` 過，`deploy.sh` 仍會重建。
 2. `git merge --ff-only` 拉下新版本，列出這次更新的 commit
 3. 建置新映像檔（這段時間舊的 bot 還在運作）
 4. 停止 bot，把 `data/coinslot.db*` 複製到 `data/backups/manual-<時間>/`（保留最近 10 份）
@@ -217,9 +219,13 @@ cd /opt/coinslot
 
 | 選項 | 用途 |
 |---|---|
-| `--force` | 沒有新 commit 也重建、重啟 |
+| `--force` | 正在跑的已經是最新版也重建、重啟 |
 | `--register` | 強制重新註冊 slash commands |
 | `--no-pull` | 不碰 git，直接部署目前的程式碼 |
+
+**同一個 token 只能有一個 bot 在跑**。本機 `npm run dev` 或本機的 `docker compose up` 和 Proxmox 上的 bot 同時跑時，
+兩個都會回應：你可能看到舊版格式的回覆、重複的回覆，log 會出現 `Interaction has already been acknowledged`（40060），
+紀錄也會分別寫進兩邊的資料庫。本機測試前先停掉 Proxmox 上的 bot，或另外建一個測試用的 Discord application。
 
 **資料不會因為更新而消失**：資料庫在 `data/`（掛進容器的 volume），不在映像檔也不在 git 裡。
 不要刪掉 `/opt/coinslot` 重新 clone，也不要把本機整個資料夾 rsync 過去（會用本機的 `data/`、`.env` 蓋掉伺服器上的）。

@@ -1,6 +1,10 @@
 services:
   coinslot:
-    build: .
+    build:
+      context: .
+      labels:
+        # Set by deploy.sh so it can tell which commit is actually running.
+        coinslot.revision: ${COINSLOT_REVISION:-unknown}
     image: coinslot:latest
     container_name: coinslot
     restart: unless-stopped

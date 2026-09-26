@@ -219,6 +219,10 @@ npm run register
 
 ### 5.2 啟動 bot
 
+> ⚠️ **先確認 Proxmox 上的 bot 已停止**（在 LXC 上 `docker compose stop`），或改用另一個測試用 application 的 token。
+> 同一個 token 同時跑兩個 bot，兩邊都會回應，看到的格式可能是舊版的，紀錄也會分散在兩個資料庫。
+> 本機測完記得停掉（`Ctrl+C`；用 Docker 跑的話 `docker compose down`），再到 LXC `docker compose start`。
+
 ```bash
 DB_PATH=./data/coinslot.db npm run dev
 ```
@@ -321,7 +325,9 @@ cd /opt/coinslot
 
 | 情境 | 預期 |
 |---|---|
-| GitHub 上沒有新 commit | `OK Already up to date: <hash> <訊息>`，bot 不會重啟 |
+| 正在跑的已經是最新 commit | `OK Already deployed: <hash> <訊息>`，bot 不會重啟 |
+| 先手動 `git pull` 過，但容器還是舊版 | `==> Running <舊 hash>, deploying <新 hash>`，照常重建 |
+| 容器是用 `deploy.sh` 以外的方式啟動的（沒有版本標籤） | `==> Running version unknown ...`，照常重建 |
 | 有新 commit | 列出 `Incoming commits:`，依序 build → 停止 → 備份 → 啟動，最後 `OK Deployed ...` |
 | 這次的更新含 migration（例如第一次從正數金額升級） | 多印一行 `Applied migrations ...; backup: /data/backups/pre-migration-....db` |
 | `src/discord/commands/` 有改 | 出現 `Slash command definitions changed` 與 `Slash commands re-registered` |
@@ -329,7 +335,10 @@ cd /opt/coinslot
 | build 失敗 | `WARN Build failed; the running bot was not touched.`，舊 bot 繼續運作，並印出回復指令 |
 | bot 啟動失敗（例如 token 錯） | `WARN The bot failed to start.`、最近的 log、回復指令（含還原資料庫） |
 
-更新後確認資料還在：
+更新後確認版本與資料：
+
+- `docker inspect coinslot -f '{{ index .Config.Labels "coinslot.revision" }}'` 等於 `git rev-parse HEAD`
+- Discord 上 `/today` 是新格式（例如 `Today: 2 entries · Spent -$281`）；若仍是舊格式，檢查是否還有其他地方在跑同一個 bot
 
 - `ls data/backups/` 多一個 `manual-<時間>/`，裡面有 `coinslot.db`
 - Discord 上 `/today`、`/week` 仍看得到更新前的紀錄

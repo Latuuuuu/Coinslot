@@ -57,6 +57,14 @@ data_owner=$(stat -c %u data)
 PREV=$(git rev-parse HEAD)
 BACKUP_DIR=""
 
+# Commit baked into the running container ("" if not running or built outside deploy.sh).
+running_revision() {
+  local id
+  id=$(docker compose ps -q --status running "$SERVICE" 2>/dev/null || true)
+  [[ -n "$id" ]] || return 0
+  docker inspect -f '{{ index .Config.Labels "coinslot.revision" }}' "$id" 2>/dev/null || true
+}
+
 rollback_hint() {
   echo
   echo "To roll back to the previous version ($(git log -1 --format='%h %s' "$PREV")):"
@@ -75,11 +83,6 @@ if ((PULL)); then
   info "Fetching updates"
   git fetch --quiet
   UPSTREAM=$(git rev-parse '@{u}')
-  if [[ "$UPSTREAM" == "$PREV" ]] && ((!FORCE)); then
-    ok "Already up to date: $(git log -1 --format='%h %s')"
-    echo "   Use --force to rebuild and restart anyway."
-    exit 0
-  fi
   if [[ "$UPSTREAM" != "$PREV" ]]; then
     echo "Incoming commits:"
     git log --format='  %h %s' "$PREV..$UPSTREAM"
@@ -89,6 +92,25 @@ if ((PULL)); then
 fi
 NEW=$(git rev-parse HEAD)
 
+# Skip only when the running container was built from exactly this commit.
+# Comparing git alone is not enough: a manual `git pull` updates the code but not the container.
+RUNNING=$(running_revision)
+if [[ "$RUNNING" == "$NEW" ]] && ((!FORCE)); then
+  ok "Already deployed: $(git log -1 --format='%h %s')"
+  echo "   Use --force to rebuild and restart anyway."
+  exit 0
+fi
+if [[ -z "$RUNNING" || "$RUNNING" == "unknown" ]]; then
+  info "Running version unknown (bot stopped or started outside deploy.sh); deploying $(git rev-parse --short HEAD)"
+elif [[ "$RUNNING" != "$NEW" ]]; then
+  info "Running $(git rev-parse --short "$RUNNING" 2>/dev/null || echo "${RUNNING:0:7}"), deploying $(git rev-parse --short HEAD)"
+fi
+# The running commit is the real "previous version" (rollback target, command diff),
+# even if the code was already pulled by hand.
+if [[ -n "$RUNNING" ]] && git cat-file -e "$RUNNING^{commit}" 2>/dev/null; then
+  PREV=$RUNNING
+fi
+
 if [[ "$NEW" != "$PREV" ]] && ! git diff --quiet "$PREV" "$NEW" -- src/discord/commands; then
   info "Slash command definitions changed; they will be re-registered"
   REGISTER=1
@@ -96,6 +118,7 @@ fi
 
 # ---------------------------------------------------------------- 2. build (old container keeps running)
 info "Building image"
+export COINSLOT_REVISION="$NEW"
 if ! docker compose build --quiet; then
   warn "Build failed; the running bot was not touched."
   rollback_hint
