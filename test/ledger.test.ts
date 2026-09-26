@@ -122,6 +122,7 @@ describe('Ledger.week / weeklyReport', () => {
   it('handles an empty week', async () => {
     setNow('2026-10-12T21:00:00+08:00');
     expect(await ledger.weeklyReport(USER)).toEqual({
+      range: { start: '2026-10-11T16:00:00.000Z', end: '2026-10-18T16:00:00.000Z' },
       count: 0,
       total: 0,
       top: [],

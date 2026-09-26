@@ -1,8 +1,8 @@
 # Coinslot 手動驗證指南
 
 > 最後更新：2026-09-26
-> 目前進度：HANDOFF 第 13 節步驟 1–4（專案骨架、解析器、台北時間區間、資料層與 ledger）。
-> Discord、排程、Docker 還沒做，所以**現在還不能在 Discord 上測試**。以下全部在本機終端機執行。
+> 目前進度：HANDOFF 第 13 節步驟 1–9 的程式碼都已完成。
+> 第 1–4 節不需要 Discord 就能驗證；第 5 節以後需要先完成 README 的 Developer Portal 設定。
 
 所有指令都在專案根目錄 `/home/latuuu/DIT/Coinslot` 執行。
 
@@ -13,6 +13,10 @@ node -v          # 應為 v24.x
 npm install      # 第一次或 package.json 有變動時
 ```
 
+> **本機執行時 `DB_PATH` 的注意事項**：`.env` 若寫 `DB_PATH=/data/coinslot.db`，本機沒有權限建立 `/data`。
+> 本機請改成 `DB_PATH=./data/coinslot.db`（Docker 會自動改用 `/data/coinslot.db`，不受 `.env` 影響），
+> 或在指令前加 `DB_PATH=./data/coinslot.db` 臨時覆蓋。
+
 ## 1. 自動檢查（一次跑完）
 
 ```bash
@@ -22,8 +26,8 @@ npm run typecheck && npm run lint && npm run format:check && npm test
 預期：每一段都沒有錯誤，最後看到
 
 ```
-Test Files  5 passed (5)
-     Tests  47 passed (47)
+Test Files  8 passed (8)
+     Tests  70 passed (70)
 ```
 
 | 測試檔 | 驗證內容 |
@@ -33,6 +37,9 @@ Test Files  5 passed (5)
 | `test/period.test.ts` | 台北時間跨日、跨週邊界（在洛杉磯時區下執行，確認不受容器 TZ 影響） |
 | `test/repository.test.ts` | SQLite 寫入、軟刪除、區間查詢 |
 | `test/ledger.test.ts` | 記帳、撤銷、今日、本週、週報與上週比較 |
+| `test/format.test.ts` | 所有回覆文字、週報、CSV（含 Excel 公式注入防護） |
+| `test/access.test.ts` | 白名單：只處理擁有者在記帳頻道或私訊的訊息 |
+| `test/jobs.test.ts` | 提醒是否該發、週報內容、cron 時區、備份與保留 14 份、心跳 |
 
 想只跑某一個檔案或邊改邊測：
 
@@ -41,16 +48,14 @@ npx vitest run test/parse.test.ts
 npm run test:watch
 ```
 
-## 2. 互動式 Playground（最主要的人工驗證方式）
+## 2. 互動式 Playground（不需要 Discord）
 
-Playground 不需要 Discord，也不需要 `.env`，直接呼叫解析器和 ledger 核心。
+Playground 直接呼叫解析器和 ledger 核心，不需要 `.env`。
 
 ```bash
 npm run playground                         # 資料存在記憶體，離開就消失
-npm run playground -- ./data/play.db       # 資料存成檔案，可重複開啟（data/ 已被 .gitignore 排除）
+npm run playground -- ./data/play.db       # 資料存成檔案（先 mkdir -p data）
 ```
-
-> 用檔案模式前請先 `mkdir -p data`。
 
 ### 可用指令
 
@@ -65,8 +70,6 @@ npm run playground -- ./data/play.db       # 資料存成檔案，可重複開�
 | `/help` `/quit` | 說明、離開 |
 
 ### 建議的驗證流程
-
-把下面整段貼進 playground，或直接用管線一次跑完：
 
 ```bash
 printf '%s\n' \
@@ -93,8 +96,6 @@ printf '%s\n' \
 
 ### 解析器檢查清單
 
-用 `/parse` 逐一確認：
-
 | 輸入 | 預期 |
 |---|---|
 | `-120 午餐` / `午餐 -120` / `120 午餐` | `amount: 120, note: '午餐'` |
@@ -116,50 +117,134 @@ printf '%s\n' \
 
 ## 3. 直接查看資料庫
 
-本機沒有安裝 `sqlite3` CLI，可以用 Node 查看檔案模式產生的資料庫：
+本機沒有安裝 `sqlite3` CLI，用 Node 查看：
 
 ```bash
-node -e "const D=require('better-sqlite3');const db=new D('./data/play.db',{readonly:true});console.table(db.prepare('SELECT * FROM entries').all())"
+node -e "const D=require('better-sqlite3');const db=new D('./data/coinslot.db',{readonly:true});console.table(db.prepare('SELECT * FROM entries').all())"
 ```
+
+（查 playground 的資料就把路徑換成 `./data/play.db`。）
 
 確認：
 
 - `amount` 是正整數
 - `created_at` 是 UTC 並以 `Z` 結尾
-- `/undo` 過的那筆 `deleted_at` 有值，而且沒有真的被刪掉（軟刪除）
-- `source` 是 `text`
+- `/undo` 過的那筆 `deleted_at` 有值，但資料列還在（軟刪除）
+- `source`：純文字為 `text`、`/log` 為 `slash`
 
-## 4. 環境變數驗證
-
-目前還沒有主程式會讀 `.env`，可以直接呼叫 `loadConfig` 看錯誤訊息：
+## 4. 設定檢查（不會印出 token）
 
 ```bash
-npx tsx -e "import {loadConfig} from './src/config.ts'; try { loadConfig({ DISCORD_TOKEN: 'x', DISCORD_APP_ID: '1', GUILD_ID: '223456789012345678', LEDGER_CHANNEL_ID: '323456789012345678', OWNER_USER_ID: '423456789012345678', REMINDER_TIME: '25:00' }) } catch (e) { console.log(e.message) }"
+npx tsx -e "import {loadDotEnv} from './src/env.ts'; import {loadConfig} from './src/config.ts'; loadDotEnv(); try { const c = loadConfig(); console.log('OK', { timezone: c.timezone, reminder: c.reminderTime, weekly: c.weeklyReport, dbPath: c.dbPath, heartbeat: !!c.uptimeKumaPushUrl }) } catch (e) { console.log(e.message) }"
 ```
 
-預期：
+預期：印出 `OK { ... }`。若有錯，會列出哪個變數、錯在哪裡。
 
-```
-Invalid environment configuration:
-  DISCORD_APP_ID: must be a Discord snowflake ID
-  REMINDER_TIME: must be HH:MM (24h)
-```
+## 5. Discord 連線（步驟 5–6）
 
-## 5. Production build
+### 5.1 註冊指令
 
 ```bash
-npm run build && ls dist/db/schema.sql && rm -rf dist
+npm run register
 ```
 
-預期：build 沒有錯誤，而且 `dist/db/schema.sql` 存在（程式執行時要讀它建表）。
-
-## 6. 目前還不能驗證的項目
-
-| 項目 | 對應步驟 |
+| 結果 | 意思 / 處理 |
 |---|---|
-| Discord 純文字記帳、私訊 | 5 |
-| Slash commands、`/export` CSV | 6 |
-| 每晚提醒、週報排程 | 7 |
-| Docker、備份、心跳 | 8 |
+| `Registered 5 guild commands: /log /undo /today /week /export` | 成功 |
+| `Missing Access ...` 並附一個邀請網址 | bot 還沒加入私人伺服器，或 `GUILD_ID` 錯了 → 開那個網址把 bot 加進去 |
+| `Unauthorized ...` | `DISCORD_TOKEN` 錯誤 → 到 Developer Portal 重設 |
 
-每做完一個步驟，這份文件會補上對應的驗證方式。
+### 5.2 啟動 bot
+
+```bash
+DB_PATH=./data/coinslot.db npm run dev
+```
+
+預期 log：
+
+```
+... Logged in as Coinslot#xxxx
+... Scheduled reminder: next run 2026-...
+... Scheduled weekly-report: next run 2026-...
+... Scheduled backup: next run 2026-...
+```
+
+若看到 `Message Content Intent is not enabled` → Developer Portal → Bot → 開啟 **Message Content Intent**。
+
+### 5.3 純文字記帳
+
+| 在哪裡、做什麼 | 預期 |
+|---|---|
+| 記帳頻道輸入 `午餐 -120` | bot 回覆 `Logged 午餐 -120`（不會 ping 你） |
+| 記帳頻道輸入 `-１，２００ 耳機` | `Logged 耳機 -1,200` |
+| 記帳頻道輸入 `今天好累` | 訊息被加上 ❓，bot 不回話 |
+| 記帳頻道輸入 `+500 薪水` | `Amount must be 1–10,000,000 (expenses only).` |
+| **其他頻道**輸入 `午餐 -120` | 沒有任何反應 |
+| **私訊 bot** 輸入 `-85 飲料` | `Logged 飲料 -85` |
+| 輸入 `-50 @everyone` | 回覆裡有 `@everyone` 字樣，但**不會**真的通知任何人 |
+| 請別人（或分身帳號）在記帳頻道輸入 | 沒有反應 |
+
+### 5.4 Slash commands（回覆都只有你看得到）
+
+| 指令 | 預期 |
+|---|---|
+| `/log text:早餐 -60` | `Logged 早餐 -60` |
+| `/today` | `Today: N entries, 合計`，下面列出每筆的台北時間 |
+| `/week` | `This week (M/D–M/D): ...` 與 `Top:` 最大三筆 |
+| `/undo` | `Undid 早餐 -60`；再跑一次 `/today` 應該少一筆 |
+| `/export` | 附上 `coinslot-YYYYMMDD.csv`，用 Excel 打開中文不會亂碼 |
+| 別人使用任一指令 | `Not authorized.` |
+
+## 6. 排程（步驟 7）
+
+排程時間不想等的話，可以暫時把 `.env` 的時間改成 1–2 分鐘後再重啟 bot，驗證完記得改回來：
+
+```bash
+# 例：現在是 18:03（台北時間）
+REMINDER_TIME=18:05 WEEKLY_REPORT='SAT 18:05' DB_PATH=./data/coinslot.db npm run dev
+```
+
+（命令列上的值會蓋過 `.env`；`WEEKLY_REPORT` 的星期要填今天。）
+
+| 情境 | 預期 |
+|---|---|
+| 今天**沒有**紀錄，到了提醒時間 | 記帳頻道出現 `@你 Nothing logged today. Spent it? Slot it.`，而且真的收到通知；log 顯示 `Reminder sent` |
+| 今天**已有**紀錄，到了提醒時間 | 不發訊息；log 顯示 `Reminder skipped (already logged today)` |
+| 到了週報時間 | 記帳頻道出現 `**Weekly report M/D–M/D**`、合計、與上週比較、`Top:` |
+
+## 7. 備份與心跳（步驟 8）
+
+備份預設每天 04:00 執行。想立即測試：
+
+```bash
+npx tsx -e "import {openDatabase} from './src/db/repository.ts'; import {backupDatabase} from './src/jobs/backup.ts'; const db = openDatabase('./data/coinslot.db'); backupDatabase(db, './data/backups', new Date(), 'Asia/Taipei').then(console.log)"
+ls data/backups
+```
+
+預期：`data/backups/coinslot-YYYY-MM-DD.db` 出現，且可以用第 3 節的指令打開（路徑換成備份檔）。
+
+心跳：設定 `UPTIME_KUMA_PUSH_URL` 後啟動 bot，Uptime Kuma 的 Push 監控應在 1 分鐘內變成綠色；停掉 bot 後，超過心跳間隔會變紅。
+
+## 8. Docker（步驟 8）
+
+```bash
+docker compose build
+mkdir -p data
+docker compose run --rm coinslot node dist/discord/register.js
+docker compose up -d
+docker compose logs -f           # 看到 Logged in as ... 即成功，Ctrl+C 離開 log
+```
+
+檢查：
+
+- `docker compose ps` 狀態為 `running`
+- 在 Discord 記一筆後，`ls data/` 有 `coinslot.db`，而且擁有者是 uid 1000
+- `docker compose restart` 後 `/today` 的資料還在（資料有存到 volume）
+- `docker compose down` 停止
+
+若 log 出現 `SQLITE_CANTOPEN` 或 permission denied：`sudo chown 1000:1000 data`。
+
+## 9. 已知限制
+
+- `/log` 的 autocomplete（常用 note 建議）未實作，是 HANDOFF 列的加分項。
+- slash commands 只註冊在私人伺服器（未啟用 User Install），所以**私訊中只能用純文字記帳**，不能用 `/` 指令。

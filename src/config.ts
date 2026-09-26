@@ -56,7 +56,7 @@ const envSchema = z.object({
     emptyToUndefined,
     weeklySchedule.default({ weekday: 7, hour: 21, minute: 0 }),
   ),
-  DB_PATH: z.preprocess(emptyToUndefined, z.string().default('/data/coinslot.db')),
+  DB_PATH: z.preprocess(emptyToUndefined, z.string().default('./data/coinslot.db')),
   UPTIME_KUMA_PUSH_URL: z.preprocess(emptyToUndefined, z.url().optional()),
 });
 

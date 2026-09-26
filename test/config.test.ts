@@ -15,7 +15,7 @@ describe('loadConfig', () => {
     expect(config.timezone).toBe('Asia/Taipei');
     expect(config.reminderTime).toEqual({ hour: 22, minute: 0 });
     expect(config.weeklyReport).toEqual({ weekday: 7, hour: 21, minute: 0 });
-    expect(config.dbPath).toBe('/data/coinslot.db');
+    expect(config.dbPath).toBe('./data/coinslot.db');
     expect(config.uptimeKumaPushUrl).toBeUndefined();
   });
 

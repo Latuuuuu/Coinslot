@@ -1,0 +1,18 @@
+services:
+  coinslot:
+    build: .
+    image: coinslot:latest
+    container_name: coinslot
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # Always use the mounted volume inside the container, whatever .env says.
+      DB_PATH: /data/coinslot.db
+    # The image runs as uid 1000 ("node"); ./data must be writable by it.
+    volumes:
+      - ./data:/data
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'

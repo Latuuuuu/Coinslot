@@ -1,6 +1,6 @@
 import type { Entry, EntryRepository, EntrySource } from '../db/repository.js';
 import { parseEntry, type ParseResult } from './parse.js';
-import { dayRange, previousWeekRange, toUtcIso, weekRange } from './period.js';
+import { dayRange, previousWeekRange, toUtcIso, weekRange, type UtcRange } from './period.js';
 
 export type LogResult =
   { ok: true; entry: Entry } | { ok: false; reason: Extract<ParseResult, { ok: false }>['reason'] };
@@ -12,6 +12,8 @@ export interface DaySummary {
 }
 
 export interface WeekSummary {
+  /** The week's UTC range (Monday 00:00 local to next Monday 00:00 local). */
+  range: UtcRange;
   count: number;
   total: number;
   /** Largest entries this week, biggest first (ties: earliest first). */
@@ -86,9 +88,9 @@ export class Ledger {
   }
 
   async week(userId: string): Promise<WeekSummary> {
-    const { start, end } = weekRange(this.now(), this.tz);
-    const entries = await this.repo.listBetween(userId, start, end);
-    return { count: entries.length, total: sum(entries), top: largest(entries, TOP_COUNT) };
+    const range = weekRange(this.now(), this.tz);
+    const entries = await this.repo.listBetween(userId, range.start, range.end);
+    return { range, count: entries.length, total: sum(entries), top: largest(entries, TOP_COUNT) };
   }
 
   async weeklyReport(userId: string): Promise<WeeklyReport> {
