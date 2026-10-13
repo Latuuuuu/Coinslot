@@ -158,6 +158,35 @@ Top spending
 - **每月 1 號 21:00**：月報（上個月的合計、Top spending、與前一個月支出比較）
 - **每天 04:00**：備份資料庫到 `data/backups/`，保留最近 14 份
 
+## 網頁介面
+
+除了 Discord，也可以用瀏覽器（手機或電腦）操作，分成兩頁：
+
+- **行事曆**：月曆上每格顯示當天支出，支出越多顏色越深，有收入的日子右上角有綠點。
+  - 點**日期**：看當天每一筆，可以**編輯**（金額、備註、日期、時間）、**刪除**、**補記**（同樣打 `午餐 -120`，可指定時間）。
+  - 點最左欄的**週數**（例如 `W41`）：該週的摘要與每日明細，等同 `/week 41 -a`。
+  - 下方是整月合計與 Top spending 前 5；「每日明細」看整個月每一筆。
+  - `‹ ›` 切換月份，可以一路往回看過去的月份。
+- **聊天室**：和 Discord 一樣打字記帳，支援 `/today`、`/week [n] [-a]`、`/month [n] [-a]`、`/undo`、`/export`、`/help`；輸入 `/` 會跳出指令提示。
+  對話紀錄存在伺服器，手機、電腦看到的是同一份。
+
+版面：手機一次顯示一頁，**左右滑動**（或點上方的「行事曆／聊天室」）切換；寬螢幕（≥ 900px）兩頁並排。支援深色模式。
+
+### 各自獨立的 `/undo`
+
+| 在哪裡記的 | 紀錄來源 | 誰的 `/undo` 會撤銷它 |
+|---|---|---|
+| Discord 打字或 `/log` | `text`／`slash` | 只有 Discord 的 `/undo` |
+| 網頁聊天室 | `web` | 只有網頁聊天室的 `/undo` |
+| 行事曆補記 | `calendar` | 都不會；在行事曆上直接刪除 |
+
+行事曆上的編輯與刪除可以處理任何來源的紀錄。日明細裡每筆下方會標示來源（Discord／網頁聊天／行事曆）。
+
+### 加到手機主畫面
+
+用 Safari（iPhone）或 Chrome（Android）開網頁 → 分享／選單 →「加入主畫面」，之後會像 app 一樣全螢幕開啟。
+iPhone 主畫面的圖示要用 PNG：把 `coinslot-avatar-copper.png` 複製成 `web/public/apple-touch-icon.png` 再部署；沒有這個檔案時 iPhone 會用網頁截圖當圖示。
+
 ## 預設值與設計決定
 
 | 項目 | 預設 | 調整方式 |
@@ -211,6 +240,9 @@ Top spending
 | `MONTHLY_REPORT` | | `D HH:MM`（D 為 1–28，確保每個月都有這天），預設 `1 21:00`，報上個月 |
 | `DB_PATH` | | 本機預設 `./data/coinslot.db`；Docker 固定為 `/data/coinslot.db` |
 | `UPTIME_KUMA_PUSH_URL` | | Uptime Kuma push 網址；有設定就每分鐘送一次心跳（連線正常時才送） |
+| `WEB_PORT` | | 網頁介面的 port，預設 `8080`（Docker 只綁在 LXC 的 `127.0.0.1`） |
+| `WEB_ALLOWED_USERS` | | 允許使用網頁的 Tailscale 帳號（逗號分隔，例如 `you@gmail.com`）；留空不檢查 |
+| `WEB_ONLY` | | 開發用：`1` = 只開網頁，不登入 Discord、不跑排程 |
 
 設定錯誤時程式啟動會直接列出是哪個變數有問題。token 一旦外洩，立刻到 Developer Portal 重設。
 
@@ -230,7 +262,22 @@ npm run dev              # 啟動 bot（檔案變動會自動重啟）
 | `npm test` | 單元測試 |
 | `npm run typecheck` / `lint` / `format` | 型別檢查、lint、格式化 |
 | `npm run playground` | 不連 Discord，直接在終端機試記帳（見 DEBUG.md） |
-| `npm run build` / `start` | 編譯後執行 |
+| `npm run build` / `start` | 編譯後端與前端後執行 |
+| `npm run build:web` | 只 build 前端（輸出到 `dist/public`） |
+| `npm run dev:web` | 前端開發伺服器（http://localhost:5173，`/api` 轉到本機 8080） |
+
+### 本機開發網頁介面
+
+**本機不要登入 Discord**（否則會和 Proxmox 上的 bot 同時回應），用 `WEB_ONLY=1` 搭配另一個資料庫：
+
+```bash
+# 終端機 1：後端（只開網頁 API，資料存在 data/dev.db）
+WEB_ONLY=1 DB_PATH=./data/dev.db npm run dev
+# 終端機 2：前端（改了畫面會即時更新）
+npm run dev:web
+```
+
+開 http://localhost:5173。只想看 build 好的版本：`npm run build:web` 後直接開 http://localhost:8080。
 
 手動驗證方式見 [DEBUG.md](DEBUG.md)。
 
@@ -311,11 +358,49 @@ cd /opt/coinslot
   docker compose start
   ```
 
+### 網頁介面（Tailscale）
+
+網頁只綁在 LXC 的 `127.0.0.1:8080`，DIT 內網的其他人連不到；透過 Tailscale 只讓你自己的裝置連線。
+
+1. **讓 LXC 能跑 Tailscale**（非特權 LXC 需要 `/dev/net/tun`）。在 **Proxmox 主機**上編輯 `/etc/pve/lxc/<CTID>.conf`，加上：
+
+   ```
+   lxc.cgroup2.devices.allow: c 10:200 rwm
+   lxc.mount.entry: /dev/net/tun dev/net/tun none bind,create=file
+   ```
+
+   然後重開這個 LXC。（這會動到 Proxmox 主機的設定，先跟 DIT 其他管理員說一聲。）
+
+2. **在 LXC 裡安裝並登入 Tailscale**：
+
+   ```bash
+   curl -fsSL https://tailscale.com/install.sh | sh
+   tailscale up            # 照提示開網址，用你的帳號登入
+   ```
+
+3. 在 Tailscale 管理後台（DNS 頁面）開啟 **MagicDNS** 與 **HTTPS Certificates**。
+
+4. **把網頁掛到 tailnet 上**（HTTPS、自動憑證、開機後自動恢復）：
+
+   ```bash
+   tailscale serve --bg 8080
+   tailscale serve status   # 顯示網址，例如 https://coinslot.<你的 tailnet>.ts.net
+   ```
+
+5. 手機和電腦安裝 Tailscale app 並登入同一個帳號，就能開上面的網址。
+
+6. （建議）在 `.env` 設定 `WEB_ALLOWED_USERS=你的 Tailscale 登入帳號`，再跑一次 `./deploy.sh --force`。
+   `tailscale serve` 會把訪客帳號放在 `Tailscale-User-Login` header，不在名單上的一律 403。
+   設定後直接在 LXC 上 `curl localhost:8080` 也會是 403（沒有那個 header），這是正常的。
+
+網頁和 bot 是同一個容器，`deploy.sh` 不用改；更新後網頁也一起更新。
+
 ### 資料庫 migration
 
 - schema 由 [src/db/migrations.ts](src/db/migrations.ts) 管理，**啟動時自動套用**，已套用的紀錄在 `schema_migrations` 資料表。
 - 套用前若資料庫裡已經有資料，會先存一份快照到 `data/backups/pre-migration-<時間>.db`。這類檔案不算在 14 份的自動清理裡，確認沒問題後可以自行刪除。
 - `002_signed_amounts`：把舊版的正數金額轉成負數（支出），限制條件改成 `amount != 0`。
+- `003_web`：`entries` 加 `updated_at`（網頁編輯時記錄），新增 `chat_messages`（網頁聊天紀錄）。
 - 重複執行是安全的：每個 migration 和它的紀錄在同一個 transaction 裡，已套用的會跳過。
 - 新增 migration 時只能往後加，不要修改已套用的內容。
 
@@ -331,7 +416,9 @@ src/
   core/              業務邏輯，不依賴 Discord
     parse.ts         「午餐 -120」→ { amount, note }
     period.ts        台北時間的今天／週／月 → UTC 範圍；週數與月份查詢（含跨年規則）
-    ledger.ts        記帳、撤銷、查詢、統計
+    ledger.ts        記帳、撤銷（Discord／網頁分開）、編輯、刪除、查詢、統計
+    commands.ts      文字指令（網頁聊天室與 playground 共用）
+    calendar.ts      依台北日期分組
     stats.ts         支出／收入／淨額合計、依備註分組的 Top spending
     format.ts        回覆、週報、月報、每日明細、長訊息切段、CSV
   db/
@@ -339,13 +426,15 @@ src/
     repository.ts    repository 介面與 SQLite 實作（介面為 async，方便將來換 D1）
   discord/           client、訊息與指令處理、指令註冊
   jobs/              提醒、週報、月報、備份、心跳排程
-  index.ts           進入點
+  web/               網頁 API（Hono）與靜態檔服務
+  index.ts           進入點（bot 與網頁在同一個程式）
+web/                 網頁前端（Vite + React），build 到 dist/public
 test/                單元測試（Vitest）
 scripts/playground.ts  終端機互動測試
 deploy.sh            伺服器上的更新腳本（pull → build → 備份 → 重啟 → 確認）
 ```
 
-將來若要搬到 Cloudflare Workers（HTTP Interactions），只需替換 `discord/`、`jobs/` 與 `db/` 的實作，`core/` 可以直接沿用。
+將來若要搬到 Cloudflare Workers（HTTP Interactions），只需替換 `discord/`、`jobs/` 與 `db/` 的實作，`core/` 可以直接沿用；網頁 API 用的 Hono 也能直接跑在 Workers 上。
 
 ## 品牌
 

@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Coinslot">
+  <!-- Flat copper coin slot: round frame + upright slot (HANDOFF §9 palette) -->
+  <rect width="512" height="512" rx="112" fill="#A85A24"/>
+  <circle cx="256" cy="256" r="168" fill="#E3B47E"/>
+  <circle cx="256" cy="256" r="168" fill="none" stroke="#7E4219" stroke-width="16"/>
+  <circle cx="256" cy="256" r="124" fill="#C98446"/>
+  <rect x="236" y="166" width="40" height="180" rx="20" fill="#2A1508"/>
+</svg>

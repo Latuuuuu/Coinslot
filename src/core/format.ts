@@ -3,7 +3,8 @@ import type { Entry } from '../db/repository.js';
 import type { DaySummary, LogResult, PeriodReport, PeriodSummary } from './ledger.js';
 import { MAX_AMOUNT } from './parse.js';
 import type { UtcRange } from './period.js';
-import { normalizeNote, summarize, type SpendingGroup, type Totals } from './stats.js';
+import { groupByLocalDay } from './calendar.js';
+import { normalizeNote, type SpendingGroup, type Totals } from './stats.js';
 
 // Plain-text formatting for replies and reports. Keep replies short: the bot should not nag.
 // Discord uses a proportional font, so never pad with spaces to align columns.
@@ -86,19 +87,13 @@ export function monthLabel(range: UtcRange, tz: string): string {
 
 /** One section per local day that has entries: a totals header, then one line per entry. */
 export function formatDailyBreakdown(entries: readonly Entry[], tz: string): string {
-  const days = new Map<string, Entry[]>();
-  for (const e of entries) {
-    const day = localTime(e.createdAt, tz).toISODate()!;
-    days.set(day, [...(days.get(day) ?? []), e]);
-  }
-  return [...days.values()]
-    .map((dayEntries) => {
-      const date = localTime(dayEntries[0]!.createdAt, tz).toFormat('ccc M/d');
-      return [
-        `${date} · ${formatTotals(summarize(dayEntries))}`,
+  return groupByLocalDay(entries, tz)
+    .map(({ date, totals, entries: dayEntries }) =>
+      [
+        `${DateTime.fromISO(date).setLocale('en').toFormat('ccc M/d')} · ${formatTotals(totals)}`,
         ...dayEntries.map((e) => timedItem(e, tz)),
-      ].join('\n');
-    })
+      ].join('\n'),
+    )
     .join('\n\n');
 }
 

@@ -79,6 +79,28 @@ const envSchema = z.object({
   ),
   DB_PATH: z.preprocess(emptyToUndefined, z.string().default('./data/coinslot.db')),
   UPTIME_KUMA_PUSH_URL: z.preprocess(emptyToUndefined, z.url().optional()),
+  WEB_PORT: z.preprocess(emptyToUndefined, z.coerce.number().int().min(1).max(65535).default(8080)),
+  // Loopback by default; the Docker image sets 0.0.0.0 and compose publishes on 127.0.0.1 only.
+  WEB_HOST: z.preprocess(emptyToUndefined, z.string().default('127.0.0.1')),
+  WEB_ALLOWED_USERS: z.preprocess(
+    emptyToUndefined,
+    z
+      .string()
+      .optional()
+      .transform((v) =>
+        (v ?? '')
+          .split(',')
+          .map((u) => u.trim().toLowerCase())
+          .filter(Boolean),
+      ),
+  ),
+  WEB_ONLY: z.preprocess(
+    emptyToUndefined,
+    z
+      .enum(['0', '1', 'true', 'false'])
+      .default('0')
+      .transform((v) => v === '1' || v === 'true'),
+  ),
 });
 
 export interface Config {
@@ -93,6 +115,14 @@ export interface Config {
   monthlyReport: MonthlySchedule;
   dbPath: string;
   uptimeKumaPushUrl: string | undefined;
+  web: {
+    port: number;
+    host: string;
+    /** Tailscale logins allowed to use the web UI; empty = no check. */
+    allowedUsers: string[];
+  };
+  /** Development: serve the web UI without logging in to Discord or running jobs. */
+  webOnly: boolean;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
@@ -116,5 +146,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     monthlyReport: e.MONTHLY_REPORT,
     dbPath: e.DB_PATH,
     uptimeKumaPushUrl: e.UPTIME_KUMA_PUSH_URL,
+    web: { port: e.WEB_PORT, host: e.WEB_HOST, allowedUsers: e.WEB_ALLOWED_USERS },
+    webOnly: e.WEB_ONLY,
   };
 }

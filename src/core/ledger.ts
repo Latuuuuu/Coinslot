@@ -1,7 +1,8 @@
 import type { Entry, EntryRepository, EntrySource } from '../db/repository.js';
-import { parseEntry, type ParseResult } from './parse.js';
+import { MAX_AMOUNT, parseEntry, type ParseResult } from './parse.js';
 import {
   dayRange,
+  localDayRange,
   monthRange,
   previousMonthRange,
   previousWeekRange,
@@ -44,6 +45,28 @@ export interface LedgerOptions {
   now?: () => Date;
 }
 
+/**
+ * Each chat surface undoes only what it logged itself. Entries added from the
+ * calendar ('calendar') are never undone; they are deleted from the calendar.
+ */
+export type UndoScope = 'discord' | 'web';
+export const UNDO_SOURCES: Record<UndoScope, readonly EntrySource[]> = {
+  discord: ['text', 'slash'],
+  web: ['web'],
+};
+
+export interface EntryEdit {
+  /** Signed: expense < 0, income > 0. */
+  amount?: number;
+  note?: string;
+  /** UTC ISO 8601 */
+  createdAt?: string;
+}
+
+export type EditResult =
+  | { ok: true; entry: Entry }
+  | { ok: false; reason: 'not_found' | 'invalid_amount' | 'invalid_time' };
+
 export const WEEK_TOP_COUNT = 3;
 export const MONTH_TOP_COUNT = 5;
 
@@ -59,7 +82,13 @@ export class Ledger {
     this.now = now;
   }
 
-  async log(userId: string, text: string, source: EntrySource): Promise<LogResult> {
+  /** Parse and store `text`. `createdAt` (UTC ISO) back-dates the entry; default is now. */
+  async log(
+    userId: string,
+    text: string,
+    source: EntrySource,
+    createdAt?: string,
+  ): Promise<LogResult> {
     const parsed = parseEntry(text);
     if (!parsed.ok) return parsed;
     const entry = await this.repo.insert({
@@ -67,17 +96,73 @@ export class Ledger {
       amount: parsed.amount,
       note: parsed.note,
       source,
-      createdAt: toUtcIso(this.now()),
+      createdAt: createdAt ?? toUtcIso(this.now()),
     });
     return { ok: true, entry };
   }
 
-  /** Soft-deletes the most recent active entry and returns it, or null if there is none. */
-  async undo(userId: string): Promise<Entry | null> {
-    const last = await this.repo.findLastActive(userId);
+  /**
+   * Soft-deletes the most recent active entry logged from `scope` and returns it,
+   * or null if there is none. Discord and the web chat never undo each other's entries.
+   */
+  async undo(userId: string, scope: UndoScope = 'discord'): Promise<Entry | null> {
+    const last = await this.repo.findLastActive(userId, UNDO_SOURCES[scope]);
     if (!last) return null;
     const deleted = await this.repo.softDelete(last.id, toUtcIso(this.now()));
     return deleted ? last : null;
+  }
+
+  async entry(userId: string, id: number): Promise<Entry | null> {
+    return this.repo.findById(userId, id);
+  }
+
+  /** Edit amount / note / time of an entry. Same amount rules as typed input. */
+  async edit(userId: string, id: number, changes: EntryEdit): Promise<EditResult> {
+    const current = await this.repo.findById(userId, id);
+    if (!current) return { ok: false, reason: 'not_found' };
+
+    const amount = changes.amount ?? current.amount;
+    if (!Number.isInteger(amount) || amount === 0 || Math.abs(amount) > MAX_AMOUNT) {
+      return { ok: false, reason: 'invalid_amount' };
+    }
+    const createdAt = changes.createdAt ?? current.createdAt;
+    if (Number.isNaN(Date.parse(createdAt))) return { ok: false, reason: 'invalid_time' };
+
+    const updated = await this.repo.update(
+      userId,
+      id,
+      {
+        amount,
+        note: (changes.note ?? current.note).trim().replace(/\s+/g, ' '),
+        createdAt: toUtcIso(new Date(createdAt)),
+      },
+      toUtcIso(this.now()),
+    );
+    return updated ? { ok: true, entry: updated } : { ok: false, reason: 'not_found' };
+  }
+
+  /** Soft delete by id (calendar). Returns the deleted entry, or null if not found. */
+  async remove(userId: string, id: number): Promise<Entry | null> {
+    const current = await this.repo.findById(userId, id);
+    if (!current) return null;
+    return (await this.repo.softDelete(id, toUtcIso(this.now()))) ? current : null;
+  }
+
+  /** Entries of the local day `date` (YYYY-MM-DD); null for an invalid date. */
+  async day(userId: string, date: string): Promise<DaySummary | null> {
+    const range = localDayRange(date, this.tz);
+    if (!range) return null;
+    const entries = await this.repo.listBetween(userId, range.start, range.end);
+    return { totals: summarize(entries), entries };
+  }
+
+  get timezone(): string {
+    return this.tz;
+  }
+
+  /** The ledger's clock (tests inject a fixed one). */
+  currentTime(): Date {
+    return this.now();
   }
 
   async today(userId: string): Promise<DaySummary> {

@@ -4,13 +4,15 @@ import type { Cron } from 'croner';
 import { Events } from 'discord.js';
 import { loadConfig } from './config.js';
 import { Ledger } from './core/ledger.js';
-import { openDatabase, SqliteEntryRepository } from './db/repository.js';
+import { openDatabase, SqliteChatRepository, SqliteEntryRepository } from './db/repository.js';
 import { createClient } from './discord/client.js';
 import { registerInteractionHandler } from './discord/interactions.js';
 import { registerMessageHandler } from './discord/messages.js';
 import { loadDotEnv } from './env.js';
 import { startJobs } from './jobs/scheduler.js';
 import { log } from './log.js';
+import { createWebApp } from './web/app.js';
+import { DEFAULT_STATIC_DIR, startWebServer } from './web/server.js';
 
 loadDotEnv();
 const config = loadConfig();
@@ -28,6 +30,18 @@ const ledger = new Ledger({
 });
 const ctx = { config, ledger };
 
+const web = startWebServer(
+  createWebApp({
+    ledger,
+    chat: new SqliteChatRepository(db),
+    userId: config.ownerUserId,
+    allowedUsers: config.web.allowedUsers,
+    staticDir: DEFAULT_STATIC_DIR,
+  }),
+  config.web.host,
+  config.web.port,
+);
+
 const client = createClient();
 registerMessageHandler(client, ctx);
 registerInteractionHandler(client, ctx);
@@ -41,6 +55,7 @@ client.once(Events.ClientReady, (ready) => {
 async function shutdown(signal: string) {
   log.info(`${signal} received, shutting down`);
   jobs.forEach((j) => j.stop());
+  web.close();
   await client.destroy();
   db.close();
   process.exit(0);
@@ -48,17 +63,27 @@ async function shutdown(signal: string) {
 process.once('SIGINT', () => void shutdown('SIGINT'));
 process.once('SIGTERM', () => void shutdown('SIGTERM'));
 
-try {
-  await client.login(config.discordToken);
-} catch (error) {
-  if (error instanceof Error && error.message === 'Used disallowed intents') {
-    log.error(
-      'Message Content Intent is not enabled. Turn it on in the Developer Portal: ' +
-        `https://discord.com/developers/applications/${config.discordAppId}/bot`,
-    );
-  } else {
-    log.error('Login failed', error);
+if (config.webOnly) {
+  // Development: no Discord login and no scheduled jobs, so a local run cannot
+  // collide with the bot deployed on the server.
+  log.warn('WEB_ONLY=1: Discord and scheduled jobs are disabled');
+} else {
+  await loginToDiscord();
+}
+
+async function loginToDiscord() {
+  try {
+    await client.login(config.discordToken);
+  } catch (error) {
+    if (error instanceof Error && error.message === 'Used disallowed intents') {
+      log.error(
+        'Message Content Intent is not enabled. Turn it on in the Developer Portal: ' +
+          `https://discord.com/developers/applications/${config.discordAppId}/bot`,
+      );
+    } else {
+      log.error('Login failed', error);
+    }
+    db.close();
+    process.exit(1);
   }
-  db.close();
-  process.exit(1);
 }

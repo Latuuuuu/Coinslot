@@ -50,7 +50,7 @@ describe('migrate: legacy positive amounts', () => {
     const db = legacyDb(join(dir, 'coinslot.db'));
     const result = migrate(db, { now: NOW });
 
-    expect(result.applied).toEqual(['001_initial', '002_signed_amounts']);
+    expect(result.applied).toEqual(['001_initial', '002_signed_amounts', '003_web']);
     expect(rows(db)).toEqual([
       { id: 1, amount: -119, note: '麥當勞', source: 'text', deleted_at: null },
       { id: 2, amount: -162, note: '肯德基', source: 'slash', deleted_at: null },
@@ -143,7 +143,7 @@ describe('openDatabase', () => {
 
     const reports: string[][] = [];
     const db = openDatabase(path, { onMigrated: (r) => reports.push(r.applied) });
-    expect(reports).toEqual([['001_initial', '002_signed_amounts']]);
+    expect(reports).toEqual([['001_initial', '002_signed_amounts', '003_web']]);
     expect(rows(db).map((r) => r.amount)).toEqual([-119, -162, -50]);
     expect(readdirSync(join(dir, 'backups'))).toHaveLength(1);
     db.close();

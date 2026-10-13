@@ -1,7 +1,7 @@
 # Coinslot 手動驗證指南
 
 > 最後更新：2026-09-26
-> 目前進度：HANDOFF 第 13 節步驟 1–9 已完成；有號金額與收入；`/month`、查詢過去的週/月、每日明細、每月月報；伺服器更新用 `deploy.sh`。
+> 目前進度：HANDOFF 第 13 節步驟 1–9 已完成；有號金額與收入；`/month`、查詢過去的週/月、每日明細、每月月報；網頁介面（行事曆＋聊天室，Tailscale）；伺服器更新用 `deploy.sh`。
 > 第 1–4 節不需要 Discord 就能驗證；第 5 節以後需要先完成 README 的 Developer Portal 設定。
 
 所有指令都在專案根目錄 `/home/latuuu/DIT/Coinslot` 執行。
@@ -26,8 +26,8 @@ npm run typecheck && npm run lint && npm run format:check && npm test
 預期：每一段都沒有錯誤，最後看到
 
 ```
-Test Files  12 passed (12)
-     Tests  157 passed (157)
+Test Files  16 passed (16)
+     Tests  217 passed (217)
 ```
 
 | 測試檔 | 驗證內容 |
@@ -43,6 +43,10 @@ Test Files  12 passed (12)
 | `test/ledger.test.ts` | 記帳（支出與收入）、撤銷、今日、本週、週報、收入也算「今天有紀錄」 |
 | `test/format.test.ts` | 金額格式、合計、`×n`、`(no note)`、規格中的範例輸出、CSV |
 | `test/access.test.ts` | 白名單：只處理擁有者在記帳頻道或私訊的訊息 |
+| `test/web-data.test.ts` | migration 003、Discord／網頁 `/undo` 互不影響、行事曆補記不被撤銷、編輯／刪除／指定日期 |
+| `test/commands.test.ts` | 網頁聊天室的文字指令（記帳、`/today`、`/week n -a`、`/month`、`/undo`、`/export`、`/help`、錯誤輸入） |
+| `test/web-api.test.ts` | 網頁 API：CSRF header、Tailscale 帳號白名單、月曆、日明細、週／月、編輯刪除補記、聊天紀錄分頁、CSV、前端檔案 |
+| `test/web-lib.test.ts` | 前端純函式：ISO 週數、月曆格子（週一開始、跨年）、色階、金額格式與輸入解析 |
 | `test/jobs.test.ts` | 提醒是否該發、週報內容、cron 時區、備份與保留 14 份、心跳 |
 
 想只跑某一個檔案或邊改邊測：
@@ -70,7 +74,8 @@ npm run playground -- ./data/play.db       # 資料存成檔案（先 mkdir -p d
 | `/now <時間>` | 假裝現在是某個時間，例如 `/now 2026-09-27T23:59+08:00` |
 | `/now` | 回到真實時間 |
 | `/range` | 顯示「今天」「本週」對應的 UTC 範圍 |
-| `/undo` `/today` `/report` | 輸出和 Discord 上看到的完全相同 |
+| `/today` `/undo` `/export` | 和網頁聊天室共用同一套指令（這裡的 `/undo` 等同 Discord 的） |
+| `/report` | 週報（排程發送的版本） |
 | `/week [n] [-a]` | 等同 `/week week:n detail:True`，例如 `/week 36 -a` |
 | `/month [n] [-a]` | 等同 `/month month:n detail:True`，例如 `/month 9 -a` |
 | `/mreport` | 月報（以 `/now` 設定的時間為準，報上個月） |
@@ -249,7 +254,7 @@ node -e "const D=require('better-sqlite3');const db=new D('./data/coinslot.db',{
 node -e "const D=require('better-sqlite3');const db=new D('./data/coinslot.db',{readonly:true});console.table(db.prepare('SELECT * FROM schema_migrations').all())"
 ```
 
-預期：有 `001_initial` 和 `002_signed_amounts` 兩列。
+預期：有 `001_initial`、`002_signed_amounts`、`003_web` 三列。
 
 ### 在複本上試跑 migration（不動原檔）
 
@@ -261,11 +266,11 @@ ls /tmp/coinslot-mig/backups
 
 預期：
 
-- 第一次執行：印出 `applied: ['001_initial', '002_signed_amounts']` 與 `backupFile`；表格裡的金額變成負數；`backups/` 出現 `pre-migration-*.db`。
+- 第一次執行：印出 `applied: ['001_initial', '002_signed_amounts', '003_web']` 與 `backupFile`（已經轉換過的資料庫只會看到 `['003_web']`）；表格裡的金額變成負數；`backups/` 出現 `pre-migration-*.db`。
 - 同一個指令再跑一次：不會印出 migration 結果，金額也**不會**被翻回正數。
 - 驗證完：`rm -rf /tmp/coinslot-mig`
 
-真正的資料庫會在 bot 啟動時自動轉換，log 會出現 `Applied migrations 001_initial, 002_signed_amounts; backup: ...`。
+真正的資料庫會在 bot 啟動時自動轉換，log 會出現 `Applied migrations ...; backup: ...`（只列出這次新套用的）。
 
 ## 4. 設定檢查（不會印出 token）
 
@@ -302,7 +307,8 @@ DB_PATH=./data/coinslot.db npm run dev
 預期 log：
 
 ```
-... Applied migrations 001_initial, 002_signed_amounts; backup: data/backups/pre-migration-....db   ← 只有第一次
+... Applied migrations 003_web; backup: data/backups/pre-migration-....db   ← 只有有新 migration 時
+... Web UI listening on http://127.0.0.1:8080
 ... Logged in as Coinslot#xxxx
 ... Scheduled reminder: next run 2026-...
 ... Scheduled weekly-report: next run 2026-...
@@ -481,7 +487,61 @@ bot 停止時，改用一次性的容器查詢（同樣唯讀）：
 docker compose run --rm --no-deps coinslot node -e "const D=require('better-sqlite3');const db=new D('/data/coinslot.db',{readonly:true});console.table(db.prepare(\"SELECT id,amount,note,datetime(created_at,'+8 hours') AS taipei,deleted_at FROM entries ORDER BY id\").all())"
 ```
 
-## 9. 已知限制
+## 9. 網頁介面
+
+### 9.1 本機（不登入 Discord）
+
+```bash
+WEB_ONLY=1 DB_PATH=./data/dev.db npm run dev     # 後端，log 會出現 WEB_ONLY=1: Discord and scheduled jobs are disabled
+npm run build:web                                 # 或另開終端機 npm run dev:web（http://localhost:5173）
+```
+
+開 http://localhost:8080。API 快速檢查：
+
+```bash
+curl -s localhost:8080/api/health                                    # {"ok":true}
+curl -s -X POST localhost:8080/api/chat -H 'content-type: application/json' -H 'x-coinslot: 1' -d '{"text":"午餐 -120"}'
+curl -s -o /dev/null -w '%{http_code}\n' -X POST localhost:8080/api/chat -H 'content-type: application/json' -d '{"text":"x -1"}'   # 403（缺 header）
+curl -s localhost:8080/api/calendar                                  # 本月每天的合計
+```
+
+### 9.2 介面檢查清單
+
+| 操作 | 預期 |
+|---|---|
+| 手機寬度開啟，左右滑動 | 在「行事曆」與「聊天室」間切換，上方分頁跟著變 |
+| 電腦寬螢幕（≥ 900px） | 兩頁並排，沒有分頁按鈕 |
+| 月曆 | 週一開始，最左欄是週數；有支出的日子顯示金額（例如 `-1.2k`），越多顏色越深；有收入有綠點；今天有外框 |
+| 點日期 | 跳出當天明細（手機從下方、電腦從右側）；每筆下方標示來源 |
+| 點一筆 → 改金額或備註 → 儲存 | 面板與月曆格子立刻更新；點金額欄會自動選取舊值 |
+| 金額改成 `0` | 顯示「金額要是 1～10,000,000 的整數；收入加 +」，不會存 |
+| 刪除 | 先跳確認，刪除後月曆更新 |
+| 補記一筆（`文具 -45`，填 15:30） | 出現在當天 15:30，來源「行事曆」 |
+| 點 `W41` | 該週摘要、Top spending、每日明細；點某天的標題會開那天 |
+| 「每日明細 ›」 | 整個月的每日明細 |
+| `‹ ›` | 換月份；不在本月時出現「今天」按鈕 |
+| 聊天室輸入 `/w` | 跳出 `/week` 提示 |
+| 聊天室 `午餐 -50` | `Logged 午餐 -$50`，切回行事曆今天的金額已更新 |
+| 聊天室 `/undo` | 只撤銷網頁聊天室記的；Discord 記的、行事曆補記的都不會被撤 |
+| 聊天室 `/export` | 回覆附「⬇ 下載 CSV」 |
+| 系統切到深色模式 | 介面變深色 |
+| 在 Discord 記一筆 | 網頁切回分頁時（或 30 秒內）自動出現 |
+
+### 9.3 在 LXC 上
+
+```bash
+tailscale serve status                    # 顯示 https://….ts.net → http://127.0.0.1:8080
+curl -s localhost:8080/api/health         # 有設 WEB_ALLOWED_USERS 時是 Forbidden（正常，沒有 Tailscale header）
+ss -ltn | grep 8080                       # 只應出現 127.0.0.1:8080，不應出現 0.0.0.0:8080
+```
+
+- 從 DIT 內網其他電腦連 `http://<LXC IP>:8080` 應該連不上。
+- 用不在 `WEB_ALLOWED_USERS` 名單上的 Tailscale 帳號開網址應該看到 `Forbidden`。
+- 網頁聊天紀錄：`docker compose exec coinslot node -e "const D=require('better-sqlite3');const db=new D('/data/coinslot.db',{readonly:true});console.table(db.prepare('SELECT id,role,content,created_at FROM chat_messages ORDER BY id DESC LIMIT 10').all())"`
+
+## 10. 已知限制
 
 - `/log` 的 autocomplete（常用 note 建議）未實作，是 HANDOFF 列的加分項。
 - slash commands 只註冊在私人伺服器（未啟用 User Install），所以**私訊中只能用純文字記帳**，不能用 `/` 指令。
+- 網頁沒有離線功能；連不到 Tailscale 時無法使用。
+- iPhone 主畫面圖示需要另外放 `web/public/apple-touch-icon.png`（見 README）。

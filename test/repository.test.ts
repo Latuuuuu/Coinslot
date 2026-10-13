@@ -4,6 +4,7 @@ import { openDatabase, SqliteEntryRepository, type NewEntry } from '../src/db/re
 
 const USER = '423456789012345678';
 const OTHER = '999999999999999999';
+const DISCORD = ['text', 'slash'] as const;
 
 function entry(overrides: Partial<NewEntry> = {}): NewEntry {
   return {
@@ -27,7 +28,7 @@ beforeEach(() => {
 describe('SqliteEntryRepository', () => {
   it('inserts and returns the stored entry with an id', async () => {
     const saved = await repo.insert(entry());
-    expect(saved).toEqual({ id: 1, ...entry() });
+    expect(saved).toEqual({ id: 1, ...entry(), updatedAt: null });
     expect(await repo.listAll(USER)).toEqual([saved]);
   });
 
@@ -40,10 +41,10 @@ describe('SqliteEntryRepository', () => {
   it('finds the latest active entry, skipping soft-deleted ones', async () => {
     const a = await repo.insert(entry({ createdAt: '2026-09-26T01:00:00.000Z' }));
     const b = await repo.insert(entry({ createdAt: '2026-09-26T02:00:00.000Z' }));
-    expect(await repo.findLastActive(USER)).toEqual(b);
+    expect(await repo.findLastActive(USER, DISCORD)).toEqual(b);
 
     expect(await repo.softDelete(b.id, '2026-09-26T03:00:00.000Z')).toBe(true);
-    expect(await repo.findLastActive(USER)).toEqual(a);
+    expect(await repo.findLastActive(USER, DISCORD)).toEqual(a);
     expect(await repo.softDelete(b.id, '2026-09-26T03:00:00.000Z')).toBe(false);
 
     const row = db.prepare('SELECT deleted_at FROM entries WHERE id = ?').get(b.id);
@@ -53,7 +54,7 @@ describe('SqliteEntryRepository', () => {
   it('breaks created_at ties by id', async () => {
     await repo.insert(entry({ note: 'first' }));
     const second = await repo.insert(entry({ note: 'second' }));
-    expect(await repo.findLastActive(USER)).toEqual(second);
+    expect(await repo.findLastActive(USER, DISCORD)).toEqual(second);
   });
 
   it('lists a half-open range and excludes other users and deleted rows', async () => {
@@ -73,6 +74,6 @@ describe('SqliteEntryRepository', () => {
   });
 
   it('returns null when there is nothing to undo', async () => {
-    expect(await repo.findLastActive(USER)).toBeNull();
+    expect(await repo.findLastActive(USER, DISCORD)).toBeNull();
   });
 });

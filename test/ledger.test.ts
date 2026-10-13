@@ -40,6 +40,7 @@ describe('Ledger.log', () => {
         note: '午餐',
         source: 'slash',
         createdAt: '2026-09-26T04:00:00.000Z',
+        updatedAt: null,
       },
     });
   });

@@ -12,6 +12,14 @@ services:
     environment:
       # Always use the mounted volume inside the container, whatever .env says.
       DB_PATH: /data/coinslot.db
+      # The web server listens on all interfaces *inside* the container...
+      WEB_HOST: 0.0.0.0
+      WEB_PORT: 8080
+      WEB_ONLY: 0
+    ports:
+      # ...but is published on the LXC's loopback only: reach it via `tailscale serve`,
+      # never directly from the DIT network.
+      - '127.0.0.1:${WEB_PORT:-8080}:8080'
     # The image runs as uid 1000 ("node"); ./data must be writable by it.
     volumes:
       - ./data:/data

@@ -79,6 +79,17 @@ export function resolveWeek(now: Date, tz: string, week?: number): ResolveWeekRe
   const today = local(now, tz);
   const weekNumber = week ?? today.weekNumber;
   const weekYear = weekNumber > today.weekNumber ? today.weekYear - 1 : today.weekYear;
+  return weekOf(now, tz, weekYear, weekNumber);
+}
+
+/** ISO week `weekNumber` of `weekYear` exactly (no cross-year rule). */
+export function weekOf(
+  now: Date,
+  tz: string,
+  weekYear: number,
+  weekNumber: number,
+): ResolveWeekResult {
+  const today = local(now, tz);
   const start = DateTime.fromObject({ weekYear, weekNumber, weekday: 1 }, { zone: tz });
   // Luxon rejects week 53 in 52-week years (and anything above 53).
   if (!start.isValid) return { ok: false, reason: 'no_such_week', weekYear, weekNumber };
@@ -108,8 +119,14 @@ export interface MonthRef {
 export function resolveMonth(now: Date, tz: string, month?: number): MonthRef {
   const today = local(now, tz);
   const m = month ?? today.month;
+  return monthOf(now, tz, m > today.month ? today.year - 1 : today.year, m);
+}
+
+/** Month `month` (1–12) of `year` exactly (no cross-year rule). */
+export function monthOf(now: Date, tz: string, year: number, month: number): MonthRef {
+  const today = local(now, tz);
+  const m = month;
   if (!Number.isInteger(m) || m < 1 || m > 12) throw new RangeError(`Invalid month: ${m}`);
-  const year = m > today.month ? today.year - 1 : today.year;
   const start = DateTime.fromObject({ year, month: m, day: 1 }, { zone: tz });
   return {
     range: toRange(start, start.plus({ months: 1 })),
@@ -118,4 +135,30 @@ export function resolveMonth(now: Date, tz: string, month?: number): MonthRef {
     isCurrent: year === today.year && m === today.month,
     isThisYear: year === today.year,
   };
+}
+
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+const HH_MM = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+/** The local calendar day `date` (YYYY-MM-DD); null if the date is invalid. */
+export function localDayRange(date: string, tz: string): UtcRange | null {
+  if (!ISO_DATE.test(date)) return null;
+  const start = DateTime.fromISO(date, { zone: tz });
+  if (!start.isValid) return null;
+  return toRange(start, start.plus({ days: 1 }));
+}
+
+/** Local `date` (YYYY-MM-DD) at `time` (HH:MM) as a UTC ISO string; null if invalid. */
+export function localDateTimeToUtc(date: string, time: string, tz: string): string | null {
+  if (!ISO_DATE.test(date) || !HH_MM.test(time)) return null;
+  const dt = DateTime.fromISO(`${date}T${time}`, { zone: tz });
+  return dt.isValid ? toUtcIso(dt) : null;
+}
+
+/** The local calendar month `month` (YYYY-MM); null if invalid. */
+export function localMonthRange(month: string, tz: string): UtcRange | null {
+  if (!/^\d{4}-\d{2}$/.test(month)) return null;
+  const start = DateTime.fromISO(`${month}-01`, { zone: tz });
+  if (!start.isValid) return null;
+  return toRange(start, start.plus({ months: 1 }));
 }

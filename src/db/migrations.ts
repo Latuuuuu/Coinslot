@@ -51,6 +51,23 @@ export const MIGRATIONS: readonly Migration[] = [
       CREATE INDEX IF NOT EXISTS idx_entries_user_created ON entries (user_id, created_at);
     `,
   },
+  {
+    // Web UI: entries can be edited, and the web chat keeps its history.
+    // New entry sources: 'web' (web chat) and 'calendar' (added from the calendar).
+    id: '003_web',
+    sql: `
+      ALTER TABLE entries ADD COLUMN updated_at TEXT;               -- UTC ISO 8601, set on edit
+      CREATE TABLE chat_messages (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id     TEXT    NOT NULL,
+        role        TEXT    NOT NULL CHECK (role IN ('user', 'bot')),
+        content     TEXT    NOT NULL,
+        attachment  TEXT,                                           -- e.g. a download URL
+        created_at  TEXT    NOT NULL                                -- UTC ISO 8601
+      );
+      CREATE INDEX idx_chat_messages_user ON chat_messages (user_id, id);
+    `,
+  },
 ];
 
 export interface MigrateOptions {

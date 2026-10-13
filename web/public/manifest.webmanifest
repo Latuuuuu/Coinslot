@@ -1,0 +1,10 @@
+{
+  "name": "Coinslot",
+  "short_name": "Coinslot",
+  "description": "Spent it? Slot it.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#F4EFE6",
+  "theme_color": "#A85A24",
+  "icons": [{ "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
+}

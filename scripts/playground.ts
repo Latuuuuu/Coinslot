@@ -2,17 +2,14 @@
 // Usage: npm run playground [-- <db path>]   (default: in-memory, nothing is saved)
 import { createInterface } from 'node:readline/promises';
 import { DateTime } from 'luxon';
+import { runCommand } from '../src/core/commands.js';
 import {
   formatLogResult,
-  formatMonth,
   formatMonthlyReport,
-  formatToday,
-  formatUndo,
-  formatWeek,
   formatWeeklyReport,
   splitMessage,
 } from '../src/core/format.js';
-import { Ledger, MONTH_TOP_COUNT, WEEK_TOP_COUNT } from '../src/core/ledger.js';
+import { Ledger } from '../src/core/ledger.js';
 import { parseEntry } from '../src/core/parse.js';
 import { dayRange, weekRange } from '../src/core/period.js';
 import { openDatabase, SqliteEntryRepository, type Entry } from '../src/db/repository.js';
@@ -35,9 +32,10 @@ const HELP = `Type an entry (e.g. "午餐 -120") to log it, or a command:
   /now <time>     pretend the current time is <time> (ISO, e.g. 2026-09-27T23:59+08:00)
   /now            back to the real clock
   /range          show today's and this week's UTC ranges
-  /undo /today /report /mreport   same output as Discord (/mreport = monthly report)
+  /today /undo /export   same commands as the web chat (/undo here = Discord's undo)
   /week [n] [-a]  like /week week:n detail:True
   /month [n] [-a] like /month month:n detail:True
+  /report /mreport  weekly / monthly report as posted by the scheduler
   /all            raw rows (signed amounts, UTC timestamps)
   /help /quit`;
 
@@ -89,37 +87,6 @@ async function handle(input: string): Promise<boolean> {
     case '/range':
       console.log({ today: dayRange(now(), TZ), week: weekRange(now(), TZ) });
       return true;
-    case '/undo': {
-      console.log(formatUndo(await ledger.undo(USER)));
-      return true;
-    }
-    case '/today':
-      console.log(formatToday(await ledger.today(USER), TZ));
-      return true;
-    case '/week': {
-      const n = rest.find((a) => /^\d+$/.test(a));
-      const ref = ledger.weekRef(n ? Number(n) : undefined);
-      if (!ref.ok) {
-        console.log(`${ref.weekYear} has no week ${ref.weekNumber}.`);
-        return true;
-      }
-      const summary = await ledger.period(USER, ref.range, WEEK_TOP_COUNT);
-      show(
-        formatWeek(summary, TZ, {
-          current: ref.isCurrent,
-          showYear: !ref.isThisYear,
-          detail: rest.includes('-a'),
-        }),
-      );
-      return true;
-    }
-    case '/month': {
-      const n = rest.find((a) => /^\d+$/.test(a));
-      const ref = ledger.monthRef(n ? Math.min(Math.max(Number(n), 1), 12) : undefined);
-      const summary = await ledger.period(USER, ref.range, MONTH_TOP_COUNT);
-      show(formatMonth(summary, TZ, { current: ref.isCurrent, detail: rest.includes('-a') }));
-      return true;
-    }
     case '/mreport':
       console.log(formatMonthlyReport(await ledger.monthlyReport(USER), TZ));
       return true;
@@ -131,7 +98,14 @@ async function handle(input: string): Promise<boolean> {
       return true;
     default: {
       if (cmd.startsWith('/')) {
-        console.log(`Unknown command ${cmd}. Type /help.`);
+        // Shared with the web chat; behaves like Discord (source 'text', Discord's undo).
+        const reply = await runCommand(input, {
+          ledger,
+          userId: USER,
+          source: 'text',
+          undoScope: 'discord',
+        });
+        show(reply.text + (reply.attachment ? `\n[attachment: ${reply.attachment.fileName}]` : ''));
         return true;
       }
       const result = await ledger.log(USER, input, 'text');
