@@ -162,10 +162,13 @@ describe('formatToday', () => {
 describe('formatWeek', () => {
   it('matches the spec example, one item per line', () => {
     expect(
-      formatWeek({ range: week, totals: summarize(day), topSpending: topSpending(day) }, TZ),
+      formatWeek(
+        { range: week, totals: summarize(day), topSpending: topSpending(day), entries: day },
+        TZ,
+      ),
     ).toBe(
       [
-        'This week (9/21–9/27)',
+        'This week · W39 (9/21–9/27)',
         '5 entries · Spent -$2,383',
         '',
         'Top spending',
@@ -179,14 +182,24 @@ describe('formatWeek', () => {
   it('omits Top spending when there are no expenses', () => {
     const income = [entry(500, '薪水', day[0]!.createdAt)];
     expect(
-      formatWeek({ range: week, totals: summarize(income), topSpending: topSpending(income) }, TZ),
-    ).toBe(['This week (9/21–9/27)', '1 entry · Spent $0 · Earned +$500 · Net +$500'].join('\n'));
+      formatWeek(
+        {
+          range: week,
+          totals: summarize(income),
+          topSpending: topSpending(income),
+          entries: income,
+        },
+        TZ,
+      ),
+    ).toBe(
+      ['This week · W39 (9/21–9/27)', '1 entry · Spent $0 · Earned +$500 · Net +$500'].join('\n'),
+    );
   });
 
   it('handles an empty week', () => {
-    expect(formatWeek({ range: week, totals: summarize([]), topSpending: [] }, TZ)).toBe(
-      'This week (9/21–9/27)\nNothing logged yet.',
-    );
+    expect(
+      formatWeek({ range: week, totals: summarize([]), topSpending: [], entries: [] }, TZ),
+    ).toBe('This week · W39 (9/21–9/27)\nNothing logged yet.');
   });
 });
 
@@ -224,13 +237,14 @@ describe('formatWeeklyReport', () => {
           range: week,
           totals: summarize(day),
           topSpending: topSpending(day),
+          entries: day,
           previousTotals: totals({ spent: -1200 }),
         },
         TZ,
       ),
     ).toBe(
       [
-        '**Weekly report 9/21–9/27**',
+        '**Weekly report · W39 (9/21–9/27)**',
         '5 entries · Spent -$2,383',
         'Last week: Spent -$1,200 · Change -$1,183 (spent more)',
         '',
@@ -245,13 +259,21 @@ describe('formatWeeklyReport', () => {
   it('handles an empty week', () => {
     expect(
       formatWeeklyReport(
-        { range: week, totals: summarize([]), topSpending: [], previousTotals: summarize([]) },
+        {
+          range: week,
+          totals: summarize([]),
+          topSpending: [],
+          entries: [],
+          previousTotals: summarize([]),
+        },
         TZ,
       ),
     ).toBe(
-      ['**Weekly report 9/21–9/27**', 'Nothing logged this week.', 'Last week: no spending'].join(
-        '\n',
-      ),
+      [
+        '**Weekly report · W39 (9/21–9/27)**',
+        'Nothing logged this week.',
+        'Last week: no spending',
+      ].join('\n'),
     );
   });
 });

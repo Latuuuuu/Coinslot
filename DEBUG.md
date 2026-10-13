@@ -1,7 +1,7 @@
 # Coinslot 手動驗證指南
 
 > 最後更新：2026-09-26
-> 目前進度：HANDOFF 第 13 節步驟 1–9 已完成；金額為有號整數（支出負、收入正），可以用 `+` 記收入；伺服器更新用 `deploy.sh`。
+> 目前進度：HANDOFF 第 13 節步驟 1–9 已完成；有號金額與收入；`/month`、查詢過去的週/月、每日明細、每月月報；伺服器更新用 `deploy.sh`。
 > 第 1–4 節不需要 Discord 就能驗證；第 5 節以後需要先完成 README 的 Developer Portal 設定。
 
 所有指令都在專案根目錄 `/home/latuuu/DIT/Coinslot` 執行。
@@ -26,14 +26,16 @@ npm run typecheck && npm run lint && npm run format:check && npm test
 預期：每一段都沒有錯誤，最後看到
 
 ```
-Test Files  10 passed (10)
-     Tests  117 passed (117)
+Test Files  12 passed (12)
+     Tests  157 passed (157)
 ```
 
 | 測試檔 | 驗證內容 |
 |---|---|
 | `test/config.test.ts` | 環境變數預設值、格式錯誤時的訊息 |
 | `test/parse.test.ts` | HANDOFF 4.1 所有範例、全形、千分位、各種拒絕情況 |
+| `test/period-lookup.test.ts` | 月份區間、閏年、`/week N`／`/month N` 的查詢與跨年規則、第 53 週 |
+| `test/format-period.test.ts` | 週／月標題、每日明細、月報、長訊息切段（含一整個月 150 筆） |
 | `test/period.test.ts` | 台北時間跨日、跨週邊界（在洛杉磯時區下執行，確認不受容器 TZ 影響） |
 | `test/repository.test.ts` | SQLite 寫入、有號金額、`amount = 0` 被拒、軟刪除、區間查詢 |
 | `test/migrations.test.ts` | 舊資料正數 → 負數、重複執行不出錯、執行前備份、失敗會 rollback |
@@ -68,7 +70,10 @@ npm run playground -- ./data/play.db       # 資料存成檔案（先 mkdir -p d
 | `/now <時間>` | 假裝現在是某個時間，例如 `/now 2026-09-27T23:59+08:00` |
 | `/now` | 回到真實時間 |
 | `/range` | 顯示「今天」「本週」對應的 UTC 範圍 |
-| `/undo` `/today` `/week` `/report` | 輸出和 Discord 上看到的完全相同 |
+| `/undo` `/today` `/report` | 輸出和 Discord 上看到的完全相同 |
+| `/week [n] [-a]` | 等同 `/week week:n detail:True`，例如 `/week 36 -a` |
+| `/month [n] [-a]` | 等同 `/month month:n detail:True`，例如 `/month 9 -a` |
+| `/mreport` | 月報（以 `/now` 設定的時間為準，報上個月） |
 | `/all` | 原始資料列（有號金額、UTC 時間） |
 | `/help` `/quit` | 說明、離開 |
 
@@ -105,7 +110,7 @@ printf '%s\n' \
 00:10 耳機 -$1,200
 00:10 午餐 -$80
 00:10 薪水 +$500
-> This week (9/21–9/27)
+> This week · W39 (9/21–9/27)
 5 entries · Spent -$1,460 · Earned +$500 · Net -$960
 
 Top spending
@@ -113,7 +118,7 @@ Top spending
 午餐 ×2 -$200
 宵夜 -$60
 > Undid 薪水 +$500
-> **Weekly report 9/21–9/27**
+> **Weekly report · W39 (9/21–9/27)**
 4 entries · Spent -$1,460
 Last week: no spending
 
@@ -130,6 +135,73 @@ Top spending
 3. `+500 薪水` 記成收入：合計多出 `Earned +$500 · Net …`，但**不會**出現在 Top spending。
 4. `/undo` 刪掉最後一筆（薪水）後，週報沒有收入，所以不再顯示 `Earned`／`Net`。
 5. `+0 薪水` 被拒絕（金額必須 1～10,000,000）。
+
+### 查詢過去的週／月與明細
+
+```bash
+printf '%s\n' \
+  '/now 2026-08-20T12:00+08:00' '-1,500 八月房租' \
+  '/now 2026-09-01T09:00+08:00' '-1,500 房租' \
+  '/now 2026-09-03T10:00+08:00' '修腳踏車 -1,750' \
+  '/now 2026-09-05T12:05+08:00' '麥當勞 -119' \
+  '/now 2026-09-05T18:40+08:00' '麥當勞 -119' \
+  '/now 2026-09-30T09:00+08:00' '+42,000 薪水' \
+  '/now 2026-10-12T08:10+08:00' '咖啡 -65' \
+  '/now 2026-10-13T12:05+08:00' '午餐 -120' \
+  '/now 2026-10-13T20:00+08:00' '+500 發票中獎' \
+  '/week' '/week 36 -a' '/week 45' '/week 53' '/month' '/month 9 -a' '/month 12' \
+  '/now 2026-10-01T21:00+08:00' '/mreport' '/quit' | npm run -s playground
+```
+
+預期輸出（節錄）：
+
+```
+> This week · W42 (10/12–10/18)
+3 entries · Spent -$185 · Earned +$500 · Net +$315
+...
+> W36 (8/31–9/6)
+4 entries · Spent -$3,488
+
+Top spending
+修腳踏車 -$1,750
+房租 -$1,500
+麥當勞 ×2 -$238
+
+Tue 9/1 · 1 entry · Spent -$1,500
+09:00 房租 -$1,500
+
+Thu 9/3 · 1 entry · Spent -$1,750
+10:00 修腳踏車 -$1,750
+
+Sat 9/5 · 2 entries · Spent -$238
+12:05 麥當勞 -$119
+18:40 麥當勞 -$119
+> W45 2025 (11/3–11/9)
+Nothing logged yet.
+> 2025 has no week 53.
+> This month · Oct 2026
+...
+> Sep 2026
+5 entries · Spent -$3,488 · Earned +$42,000 · Net +$38,512
+...
+Wed 9/30 · 1 entry · Spent $0 · Earned +$42,000 · Net +$42,000
+09:00 薪水 +$42,000
+> Dec 2025
+Nothing logged yet.
+> **Monthly report · Sep 2026**
+5 entries · Spent -$3,488 · Earned +$42,000 · Net +$38,512
+Previous month: Spent -$1,500 · Change -$1,988 (spent more)
+...
+```
+
+確認重點：
+
+1. 本週標題有週數（`W42`）；過去的週沒有 `This week`。
+2. `-a`（Discord 上是 `detail:True`）會依日期分段，沒有紀錄的日子不列；8/20 的八月房租不在第 36 週（8/31 起）。
+3. 現在是 10 月，`/week 45`、`/month 12` 還沒開始 → 改查 2025 年，標題標出年份。
+4. 2025 年只有 52 週 → `2025 has no week 53.`
+5. 月報報的是上個月（9 月），和 8 月的支出比較。
+6. 明細很長時，playground 會顯示 `--- message 1/2 ---` 這樣的分隔，等同 Discord 上拆成的多則訊息。
 
 ### 解析器檢查清單
 
@@ -213,7 +285,7 @@ npm run register
 
 | 結果 | 意思 / 處理 |
 |---|---|
-| `Registered 5 guild commands: /log /undo /today /week /export` | 成功 |
+| `Registered 6 guild commands: /log /undo /today /week /month /export` | 成功 |
 | `Missing Access ...` 並附一個邀請網址 | bot 還沒加入私人伺服器，或 `GUILD_ID` 錯了 → 開那個網址把 bot 加進去 |
 | `Unauthorized ...` | `DISCORD_TOKEN` 錯誤 → 到 Developer Portal 重設 |
 
@@ -259,7 +331,13 @@ DB_PATH=./data/coinslot.db npm run dev
 |---|---|
 | `/log text:早餐 -60` | `Logged 早餐 -$60` |
 | `/today` | 第一行 `Today: N entries · Spent -$…`，空一行後每筆一行 `HH:mm 備註 -$金額` |
-| `/week` | `This week (M/D–M/D)`、合計一行、空一行、`Top spending` 與最多三行 |
+| `/week` | `This week · W<週數> (M/D–M/D)`、合計一行、空一行、`Top spending` 與最多三行 |
+| `/week week:18` | `W18 (4/27–5/3)` 與該週的合計（沒有 `This week`） |
+| `/week week:18 detail:True` | 摘要之後，每天一段：`Mon 4/27 · N entries · Spent …`，下面每筆一行 |
+| `/week week:53` | 今年還沒到第 53 週 → 查去年；去年沒有第 53 週 → `2025 has no week 53.` |
+| `/month` | `This month · Oct 2026`、合計、`Top spending` 最多五行 |
+| `/month month:9 detail:True` | `Sep 2026` 與 9 月每天的明細；太長時拆成多則訊息（都只有你看得到） |
+| `/month month:12`（在 12 月以前） | 查去年 12 月，標題 `Dec 2025` |
 | `/undo` | `Undid 早餐 -$60`；再跑一次 `/today` 應該少一筆 |
 | `/export` | 附上 `coinslot-YYYYMMDD.csv`，Excel 打開中文不亂碼；`amount` 是 `-60` 這種純數字 |
 
@@ -272,16 +350,17 @@ DB_PATH=./data/coinslot.db npm run dev
 
 ```bash
 # 例：現在是 18:03（台北時間）
-REMINDER_TIME=18:05 WEEKLY_REPORT='SAT 18:05' DB_PATH=./data/coinslot.db npm run dev
+REMINDER_TIME=18:05 WEEKLY_REPORT='SAT 18:05' MONTHLY_REPORT='13 18:05' DB_PATH=./data/coinslot.db npm run dev
 ```
 
-（命令列上的值會蓋過 `.env`；`WEEKLY_REPORT` 的星期要填今天。）
+（命令列上的值會蓋過 `.env`；`WEEKLY_REPORT` 的星期、`MONTHLY_REPORT` 的日期都要填今天，`MONTHLY_REPORT` 的日期只能 1–28。）
 
 | 情境 | 預期 |
 |---|---|
 | 今天**沒有**紀錄，到了提醒時間 | 記帳頻道出現 `@你 Nothing logged today. Spent it? Slot it.`，而且真的收到通知；log 顯示 `Reminder sent` |
 | 今天**已有**紀錄，到了提醒時間 | 不發訊息；log 顯示 `Reminder skipped (already logged today)` |
-| 到了週報時間 | 記帳頻道出現 `**Weekly report M/D–M/D**`、合計、`Last week: Spent …`、`Top spending`（每項一行） |
+| 到了週報時間 | 記帳頻道出現 `**Weekly report · W<週數> (M/D–M/D)**`、合計、`Last week: Spent …`、`Top spending`（每項一行） |
+| 到了月報時間 | 記帳頻道出現 `**Monthly report · <上個月>**`、合計、`Previous month: Spent …`、`Top spending`（最多五行） |
 
 ## 7. 備份與心跳（步驟 8）
 
@@ -339,9 +418,68 @@ cd /opt/coinslot
 
 - `docker inspect coinslot -f '{{ index .Config.Labels "coinslot.revision" }}'` 等於 `git rev-parse HEAD`
 - Discord 上 `/today` 是新格式（例如 `Today: 2 entries · Spent -$281`）；若仍是舊格式，檢查是否還有其他地方在跑同一個 bot
-
 - `ls data/backups/` 多一個 `manual-<時間>/`，裡面有 `coinslot.db`
-- Discord 上 `/today`、`/week` 仍看得到更新前的紀錄
+- 更新前的紀錄還在：用 `/week` 或下一節的指令確認（`/today` 只列**今天**的紀錄，過了午夜就看不到昨天的）
+
+### 8.2 在 LXC 上直接查資料庫
+
+Discord 上看不到預期的紀錄時，用這些指令直接看伺服器上的資料庫。全部是**唯讀**，bot 可以繼續跑。
+指令透過容器裡的 Node 執行（LXC 上不用另外裝 sqlite3），所以 bot 要在執行中（`docker compose ps` 狀態為 `running`）。
+
+```bash
+cd /opt/coinslot
+```
+
+**列出所有紀錄**（含已撤銷的，時間換算成台北時間）：
+
+```bash
+docker compose exec coinslot node -e "const D=require('better-sqlite3');const db=new D('/data/coinslot.db',{readonly:true});console.table(db.prepare(\"SELECT id,amount,note,source,datetime(created_at,'+8 hours') AS taipei,deleted_at FROM entries ORDER BY id\").all())"
+```
+
+**每天的筆數與合計**（不含已撤銷）：
+
+```bash
+docker compose exec coinslot node -e "const D=require('better-sqlite3');const db=new D('/data/coinslot.db',{readonly:true});console.table(db.prepare(\"SELECT date(created_at,'+8 hours') AS day,COUNT(*) AS n,SUM(CASE WHEN amount<0 THEN amount ELSE 0 END) AS spent,SUM(CASE WHEN amount>0 THEN amount ELSE 0 END) AS earned FROM entries WHERE deleted_at IS NULL GROUP BY day ORDER BY day\").all())"
+```
+
+**已套用的 migration**：
+
+```bash
+docker compose exec coinslot node -e "const D=require('better-sqlite3');const db=new D('/data/coinslot.db',{readonly:true});console.table(db.prepare('SELECT * FROM schema_migrations').all())"
+```
+
+**備份檔**：
+
+```bash
+ls -la data/backups/
+```
+
+範例輸出（列出所有紀錄）：
+
+```
+┌─────────┬────┬────────┬──────────┬────────┬───────────────────────┬────────────┐
+│ (index) │ id │ amount │ note     │ source │ taipei                │ deleted_at │
+├─────────┼────┼────────┼──────────┼────────┼───────────────────────┼────────────┤
+│ 0       │ 1  │ -162   │ '肯德基' │ 'text' │ '2026-09-26 21:46:36' │ null       │
+│ 1       │ 2  │ -119   │ '麥當勞' │ 'text' │ '2026-09-26 23:21:51' │ null       │
+└─────────┴────┴────────┴──────────┴────────┴───────────────────────┴────────────┘
+```
+
+怎麼判讀：
+
+| 看到的結果 | 意思 |
+|---|---|
+| 有紀錄，金額是 `-162` 這種負數 | 資料都在，migration 也已套用；Discord 看不到多半是查的區間不對（例如過了午夜用 `/today`） |
+| 有紀錄，但金額是正數 | migration 沒跑：bot 可能還是舊版，確認 `docker inspect` 的 revision（8.1 節）後重跑 `./deploy.sh` |
+| `deleted_at` 有值 | 那筆被 `/undo` 撤銷了，統計不會算它 |
+| 表格是空的 | 伺服器上沒有這些紀錄。若之前曾在本機跑過 bot，紀錄可能只存在本機的 `data/coinslot.db`，**不要**直接用本機的檔案覆蓋伺服器的 |
+| `service "coinslot" is not running` | bot 沒在跑；先 `docker compose up -d`，或改用下面「bot 停止時」的指令 |
+
+bot 停止時，改用一次性的容器查詢（同樣唯讀）：
+
+```bash
+docker compose run --rm --no-deps coinslot node -e "const D=require('better-sqlite3');const db=new D('/data/coinslot.db',{readonly:true});console.table(db.prepare(\"SELECT id,amount,note,datetime(created_at,'+8 hours') AS taipei,deleted_at FROM entries ORDER BY id\").all())"
+```
 
 ## 9. 已知限制
 

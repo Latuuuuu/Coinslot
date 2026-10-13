@@ -152,7 +152,49 @@ describe('Ledger.week / weeklyReport', () => {
       range: { start: '2026-10-11T16:00:00.000Z', end: '2026-10-18T16:00:00.000Z' },
       totals: { count: 0, spent: 0, earned: 0, net: 0 },
       topSpending: [],
+      entries: [],
       previousTotals: { count: 0, spent: 0, earned: 0, net: 0 },
     });
+  });
+});
+
+describe('Ledger.month / monthlyReport / lookups', () => {
+  beforeEach(async () => {
+    await logAt('2026-08-31T23:59:00+08:00', '-999 八月底');
+    await logAt('2026-09-01T00:00:00+08:00', '-1,500 房租');
+    await logAt('2026-09-15T12:00:00+08:00', '-120 午餐');
+    await logAt('2026-09-30T23:59:00+08:00', '+42,000 薪水');
+    await logAt('2026-10-01T00:00:00+08:00', '-80 早餐');
+  });
+
+  it('summarizes the current Taipei month with entries for the detail view', async () => {
+    setNow('2026-09-20T12:00:00+08:00');
+    const month = await ledger.month(USER);
+    expect(month.totals).toEqual({ count: 3, spent: -1620, earned: 42_000, net: 40_380 });
+    expect(month.entries.map((e) => e.note)).toEqual(['房租', '午餐', '薪水']);
+    expect(month.topSpending.map((g) => g.note)).toEqual(['房租', '午餐']);
+  });
+
+  it('reports last month against the month before it', async () => {
+    setNow('2026-10-01T21:00:00+08:00');
+    const report = await ledger.monthlyReport(USER);
+    expect(report.range).toEqual({
+      start: '2026-08-31T16:00:00.000Z',
+      end: '2026-09-30T16:00:00.000Z',
+    });
+    expect(report.totals).toMatchObject({ count: 3, spent: -1620, earned: 42_000 });
+    expect(report.previousTotals).toEqual({ count: 1, spent: -999, earned: 0, net: -999 });
+  });
+
+  it('looks up a past week or month through refs relative to now', async () => {
+    setNow('2026-10-13T12:00:00+08:00');
+    const sep = ledger.monthRef(9);
+    expect(sep).toMatchObject({ year: 2026, month: 9, isCurrent: false });
+    expect((await ledger.period(USER, sep.range, 5)).totals.count).toBe(3);
+
+    const w36 = ledger.weekRef(36); // 8/31–9/6
+    if (!w36.ok) throw new Error('week 36 should exist');
+    const week = await ledger.period(USER, w36.range, 3);
+    expect(week.entries.map((e) => e.note)).toEqual(['八月底', '房租']);
   });
 });

@@ -8,6 +8,11 @@ export interface TimeOfDay {
   minute: number;
 }
 
+export interface MonthlySchedule extends TimeOfDay {
+  /** Day of month, 1–28 so it exists in every month. */
+  day: number;
+}
+
 export interface WeeklySchedule extends TimeOfDay {
   /** ISO weekday: 1 = Monday ... 7 = Sunday */
   weekday: number;
@@ -35,6 +40,18 @@ const weeklySchedule = z
     return { weekday: WEEKDAYS.indexOf(day) + 1, hour, minute };
   });
 
+const monthlySchedule = z
+  .string()
+  .regex(
+    /^([1-9]|1\d|2[0-8]) ([01]\d|2[0-3]):[0-5]\d$/,
+    'must be "D HH:MM" with D 1–28, e.g. "1 21:00"',
+  )
+  .transform((value): MonthlySchedule => {
+    const [day, time] = value.split(' ') as [string, string];
+    const [hour, minute] = time.split(':').map(Number) as [number, number];
+    return { day: Number(day), hour, minute };
+  });
+
 // Treat empty strings (e.g. `UPTIME_KUMA_PUSH_URL=`) as unset.
 const emptyToUndefined = (value: unknown) => (value === '' ? undefined : value);
 
@@ -56,6 +73,10 @@ const envSchema = z.object({
     emptyToUndefined,
     weeklySchedule.default({ weekday: 7, hour: 21, minute: 0 }),
   ),
+  MONTHLY_REPORT: z.preprocess(
+    emptyToUndefined,
+    monthlySchedule.default({ day: 1, hour: 21, minute: 0 }),
+  ),
   DB_PATH: z.preprocess(emptyToUndefined, z.string().default('./data/coinslot.db')),
   UPTIME_KUMA_PUSH_URL: z.preprocess(emptyToUndefined, z.url().optional()),
 });
@@ -69,6 +90,7 @@ export interface Config {
   timezone: string;
   reminderTime: TimeOfDay;
   weeklyReport: WeeklySchedule;
+  monthlyReport: MonthlySchedule;
   dbPath: string;
   uptimeKumaPushUrl: string | undefined;
 }
@@ -91,6 +113,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     timezone: e.TIMEZONE,
     reminderTime: e.REMINDER_TIME,
     weeklyReport: e.WEEKLY_REPORT,
+    monthlyReport: e.MONTHLY_REPORT,
     dbPath: e.DB_PATH,
     uptimeKumaPushUrl: e.UPTIME_KUMA_PUSH_URL,
   };

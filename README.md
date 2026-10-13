@@ -28,9 +28,24 @@
 | `/undo` | 刪除最後一筆（軟刪除，資料庫仍保留） |
 | `/today` | 今天的每一筆與合計 |
 | `/week` | 本週合計，與依備註加總的支出前三名（Top spending） |
+| `/week week:18` | 今年第 18 週（ISO 週，週一開始） |
+| `/month` | 本月合計與支出前五名 |
+| `/month month:9` | 今年 9 月 |
+| `detail:True` | 加在 `/week`、`/month` 後面，依日期列出每一筆 |
 | `/export` | 下載全部紀錄 CSV（Excel 可直接開） |
 
 所有指令回覆都只有你看得到（ephemeral）。
+
+### 查詢過去的週與月
+
+- 打 `/week` 或 `/month` 後，Discord 會跳出可選的欄位：`week`（1–53）或 `month`（1–12），以及 `detail`（True / False）。
+- **週數**是 ISO 週：週一開始，第 1 週是包含該年第一個週四的那週（例如 2026 年第 1 週是 2025/12/29–2026/1/4）。
+  `/week` 的標題會顯示目前是第幾週，例如 `This week · W42 (10/12–10/18)`。
+- **跨年**：指定的週或月在今年還沒開始時，會改查**去年**的，標題會標出年份。
+  例如 2027 年 1 月打 `/month month:12` → 2026 年 12 月；10 月打 `/week week:45` → `W45 2025 (11/3–11/9)`。
+- 該年沒有那一週時（例如 2025 年只有 52 週），回覆 `2025 has no week 53.`。
+- 明細太長時，會依日期拆成多則訊息；超過 5 則就改成回覆摘要並附上完整明細的 `.txt` 檔。
+  一個月約 150 筆時是 2 則訊息，超過約 450 筆才會改成附檔。
 
 ### 顯示格式
 
@@ -59,7 +74,7 @@ Today: 3 entries · Spent -$238 · Earned +$500 · Net +$262
 `/week`：
 
 ```
-This week (9/21–9/27)
+This week · W39 (9/21–9/27)
 5 entries · Spent -$2,383
 
 Top spending
@@ -68,12 +83,57 @@ Top spending
 褲架 菜瓜布 抹布 -$233
 ```
 
+`/week week:36 detail:True`（過去的週，加上每日明細；沒有紀錄的日子不列）：
+
+```
+W36 (8/31–9/6)
+4 entries · Spent -$3,488
+
+Top spending
+修腳踏車 -$1,750
+房租 -$1,500
+麥當勞 ×2 -$238
+
+Tue 9/1 · 1 entry · Spent -$1,500
+09:00 房租 -$1,500
+
+Thu 9/3 · 1 entry · Spent -$1,750
+10:00 修腳踏車 -$1,750
+
+Sat 9/5 · 2 entries · Spent -$238
+12:05 麥當勞 -$119
+18:40 麥當勞 -$119
+```
+
+`/month month:9`（本月的標題是 `This month · Oct 2026`）：
+
+```
+Sep 2026
+5 entries · Spent -$3,488 · Earned +$42,000 · Net +$38,512
+
+Top spending
+修腳踏車 -$1,750
+房租 -$1,500
+麥當勞 ×2 -$238
+```
+
 週報多一行與上週**支出**的比較：
 
 ```
-**Weekly report 9/21–9/27**
+**Weekly report · W39 (9/21–9/27)**
 5 entries · Spent -$2,383
 Last week: Spent -$1,200 · Change -$1,183 (spent more)
+
+Top spending
+...
+```
+
+月報（每月 1 號，報上個月）與前一個月比較：
+
+```
+**Monthly report · Sep 2026**
+5 entries · Spent -$3,488 · Earned +$42,000 · Net +$38,512
+Previous month: Spent -$1,500 · Change -$1,988 (spent more)
 
 Top spending
 ...
@@ -84,9 +144,10 @@ Top spending
 - **金額**：支出 `-$119`、收入 `+$500`（ASCII 的 `-`、`+`，有千分位）；合計也帶正負號。
 - **合計**：只有支出時顯示 `Spent`；有收入時才加上 `Earned` 和 `Net`，例如
   `6 entries · Spent -$2,383 · Earned +$500 · Net -$1,883`。
-- **Top spending**：只計支出，依備註加總後取前三名。備註去掉頭尾空白、連續空白合併後完全相同才算同一項；
+- **Top spending**：只計支出，依備註加總後取前幾名（週 3 項、月 5 項）。備註去掉頭尾空白、連續空白合併後完全相同才算同一項；
   多筆時加 `×n`；沒有備註的歸為 `(no note)`。排序依支出金額 → 筆數 → 最近一筆的時間。
-- **Change**：本週支出減上週支出，沿用同樣的正負號：負數代表這週花得比較多。
+- **Change**：這期支出減上一期支出，沿用同樣的正負號：負數代表這期花得比較多。
+- **明細**：每天一段，標題是當天的合計，下面每筆一行；用台北時間分日。
 - 每項各佔一行；Discord 用比例字型，所以不用空格對齊。
 - `/export` 的 CSV 不套用以上格式，`amount` 是純數字的有號整數（支出為負），方便在 Excel 加總。
 
@@ -94,6 +155,7 @@ Top spending
 
 - **每晚 22:00**：今天沒有任何紀錄時，在記帳頻道提醒並 mention 你
 - **週日 21:00**：週報（合計、Top spending、與上週支出比較）
+- **每月 1 號 21:00**：月報（上個月的合計、Top spending、與前一個月支出比較）
 - **每天 04:00**：備份資料庫到 `data/backups/`，保留最近 14 份
 
 ## 預設值與設計決定
@@ -103,6 +165,8 @@ Top spending
 | 一週起始 | 週一 | 固定（ISO 週） |
 | 提醒時間 | 22:00 | `REMINDER_TIME` |
 | 週報時間 | 週日 21:00 | `WEEKLY_REPORT` |
+| 月報時間 | 每月 1 號 21:00 | `MONTHLY_REPORT` |
+| 週數 | ISO 週（週一開始） | 固定 |
 | 時區 | Asia/Taipei | `TIMEZONE`（不依賴容器 TZ） |
 | User Install | 不啟用 | 只註冊私人伺服器的 guild command |
 | 金額 | 新台幣整數；支出用 `-` 或不帶符號，收入用 `+` | — |
@@ -144,6 +208,7 @@ Top spending
 | `TIMEZONE` | | 預設 `Asia/Taipei` |
 | `REMINDER_TIME` | | `HH:MM`，預設 `22:00` |
 | `WEEKLY_REPORT` | | `DAY HH:MM`（`MON`…`SUN`），預設 `SUN 21:00` |
+| `MONTHLY_REPORT` | | `D HH:MM`（D 為 1–28，確保每個月都有這天），預設 `1 21:00`，報上個月 |
 | `DB_PATH` | | 本機預設 `./data/coinslot.db`；Docker 固定為 `/data/coinslot.db` |
 | `UPTIME_KUMA_PUSH_URL` | | Uptime Kuma push 網址；有設定就每分鐘送一次心跳（連線正常時才送） |
 
@@ -227,6 +292,8 @@ cd /opt/coinslot
 兩個都會回應：你可能看到舊版格式的回覆、重複的回覆，log 會出現 `Interaction has already been acknowledged`（40060），
 紀錄也會分別寫進兩邊的資料庫。本機測試前先停掉 Proxmox 上的 bot，或另外建一個測試用的 Discord application。
 
+想直接看伺服器上的資料庫（確認紀錄在不在、migration 有沒有跑），見 [DEBUG.md](DEBUG.md) 的「8.2 在 LXC 上直接查資料庫」。
+
 **資料不會因為更新而消失**：資料庫在 `data/`（掛進容器的 volume），不在映像檔也不在 git 裡。
 不要刪掉 `/opt/coinslot` 重新 clone，也不要把本機整個資料夾 rsync 過去（會用本機的 `data/`、`.env` 蓋掉伺服器上的）。
 
@@ -263,15 +330,15 @@ src/
   config.ts          環境變數驗證（zod）
   core/              業務邏輯，不依賴 Discord
     parse.ts         「午餐 -120」→ { amount, note }
-    period.ts        台北時間的今天／本週 → UTC 範圍
+    period.ts        台北時間的今天／週／月 → UTC 範圍；週數與月份查詢（含跨年規則）
     ledger.ts        記帳、撤銷、查詢、統計
     stats.ts         支出／收入／淨額合計、依備註分組的 Top spending
-    format.ts        回覆、週報、CSV 文字格式
+    format.ts        回覆、週報、月報、每日明細、長訊息切段、CSV
   db/
     migrations.ts    schema 與 migration（啟動時自動套用）
     repository.ts    repository 介面與 SQLite 實作（介面為 async，方便將來換 D1）
   discord/           client、訊息與指令處理、指令註冊
-  jobs/              提醒、週報、備份、心跳排程
+  jobs/              提醒、週報、月報、備份、心跳排程
   index.ts           進入點
 test/                單元測試（Vitest）
 scripts/playground.ts  終端機互動測試

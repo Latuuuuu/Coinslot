@@ -9,6 +9,7 @@ import { openDatabase, SqliteEntryRepository } from '../src/db/repository.js';
 import type { AppContext } from '../src/discord/context.js';
 import { backupDatabase, backupFileName, selectBackupsToPrune } from '../src/jobs/backup.js';
 import { sendHeartbeat } from '../src/jobs/heartbeat.js';
+import { runMonthlyReport } from '../src/jobs/monthly.js';
 import { runReminder } from '../src/jobs/reminder.js';
 import { runWeeklyReport } from '../src/jobs/weekly.js';
 
@@ -62,7 +63,7 @@ describe('runWeeklyReport', () => {
     await runWeeklyReport(ctx, notify);
     expect(notify).toHaveBeenCalledWith(
       [
-        '**Weekly report 9/21–9/27**',
+        '**Weekly report · W39 (9/21–9/27)**',
         '1 entry · Spent -$1,200',
         'Last week: no spending',
         '',
@@ -73,7 +74,35 @@ describe('runWeeklyReport', () => {
   });
 });
 
+describe('runMonthlyReport', () => {
+  it("posts last month's report", async () => {
+    clock = new Date('2026-09-15T12:00:00+08:00');
+    await ctx.ledger.log(OWNER, '-1,500 房租', 'text');
+    clock = new Date('2026-10-01T21:00:00+08:00');
+    const notify = vi.fn().mockResolvedValue(undefined);
+    await runMonthlyReport(ctx, notify);
+    expect(notify).toHaveBeenCalledWith(
+      [
+        '**Monthly report · Sep 2026**',
+        '1 entry · Spent -$1,500',
+        'Previous month: no spending',
+        '',
+        'Top spending',
+        '房租 -$1,500',
+      ].join('\n'),
+    );
+  });
+});
+
 describe('cron patterns', () => {
+  it('fires the monthly report on the 1st at 21:00 Taipei time', () => {
+    const cron = new Cron('0 21 1 * *', { timezone: TZ, paused: true });
+    expect(cron.nextRun(new Date('2026-10-13T00:00:00Z'))?.toISOString()).toBe(
+      '2026-11-01T13:00:00.000Z',
+    );
+    cron.stop();
+  });
+
   it('fires the Sunday 21:00 report in Taipei time regardless of process TZ', () => {
     const cron = new Cron('0 21 * * 0', { timezone: TZ, paused: true });
     const next = cron.nextRun(new Date('2026-09-26T00:00:00Z'));

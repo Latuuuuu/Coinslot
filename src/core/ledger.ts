@@ -1,6 +1,18 @@
 import type { Entry, EntryRepository, EntrySource } from '../db/repository.js';
 import { parseEntry, type ParseResult } from './parse.js';
-import { dayRange, previousWeekRange, toUtcIso, weekRange, type UtcRange } from './period.js';
+import {
+  dayRange,
+  monthRange,
+  previousMonthRange,
+  previousWeekRange,
+  resolveMonth,
+  resolveWeek,
+  toUtcIso,
+  weekRange,
+  type MonthRef,
+  type ResolveWeekResult,
+  type UtcRange,
+} from './period.js';
 import { summarize, topSpending, type SpendingGroup, type Totals } from './stats.js';
 
 export type LogResult =
@@ -11,15 +23,18 @@ export interface DaySummary {
   entries: Entry[];
 }
 
-export interface WeekSummary {
-  /** The week's UTC range (Monday 00:00 local to next Monday 00:00 local). */
+/** Any span of time: a week, a month, ... */
+export interface PeriodSummary {
   range: UtcRange;
   totals: Totals;
   /** Expenses grouped by note, biggest spending first. */
   topSpending: SpendingGroup[];
+  /** All active entries in the range, oldest first (for the detailed view). */
+  entries: Entry[];
 }
 
-export interface WeeklyReport extends WeekSummary {
+/** A period compared with the one before it (weekly / monthly reports). */
+export interface PeriodReport extends PeriodSummary {
   previousTotals: Totals;
 }
 
@@ -29,7 +44,8 @@ export interface LedgerOptions {
   now?: () => Date;
 }
 
-const TOP_COUNT = 3;
+export const WEEK_TOP_COUNT = 3;
+export const MONTH_TOP_COUNT = 5;
 
 /** Business logic for logging and querying entries. Knows nothing about Discord. */
 export class Ledger {
@@ -75,17 +91,51 @@ export class Ledger {
     return (await this.today(userId)).totals.count > 0;
   }
 
-  async week(userId: string): Promise<WeekSummary> {
-    const range = weekRange(this.now(), this.tz);
+  async period(userId: string, range: UtcRange, topCount: number): Promise<PeriodSummary> {
     const entries = await this.repo.listBetween(userId, range.start, range.end);
-    return { range, totals: summarize(entries), topSpending: topSpending(entries, TOP_COUNT) };
+    return {
+      range,
+      totals: summarize(entries),
+      topSpending: topSpending(entries, topCount),
+      entries,
+    };
   }
 
-  async weeklyReport(userId: string): Promise<WeeklyReport> {
+  /** Resolve `/week [n]` relative to now (see resolveWeek for the cross-year rule). */
+  weekRef(week?: number): ResolveWeekResult {
+    return resolveWeek(this.now(), this.tz, week);
+  }
+
+  /** Resolve `/month [n]` relative to now (see resolveMonth for the cross-year rule). */
+  monthRef(month?: number): MonthRef {
+    return resolveMonth(this.now(), this.tz, month);
+  }
+
+  async week(userId: string): Promise<PeriodSummary> {
+    return this.period(userId, weekRange(this.now(), this.tz), WEEK_TOP_COUNT);
+  }
+
+  async month(userId: string): Promise<PeriodSummary> {
+    return this.period(userId, monthRange(this.now(), this.tz), MONTH_TOP_COUNT);
+  }
+
+  /** This week vs last week. */
+  async weeklyReport(userId: string): Promise<PeriodReport> {
     const { start, end } = previousWeekRange(this.now(), this.tz);
     const [current, previous] = await Promise.all([
       this.week(userId),
       this.repo.listBetween(userId, start, end),
+    ]);
+    return { ...current, previousTotals: summarize(previous) };
+  }
+
+  /** Sent on the 1st: last month vs the month before it. */
+  async monthlyReport(userId: string): Promise<PeriodReport> {
+    const lastMonth = previousMonthRange(this.now(), this.tz);
+    const monthBefore = previousMonthRange(new Date(lastMonth.start), this.tz);
+    const [current, previous] = await Promise.all([
+      this.period(userId, lastMonth, MONTH_TOP_COUNT),
+      this.repo.listBetween(userId, monthBefore.start, monthBefore.end),
     ]);
     return { ...current, previousTotals: summarize(previous) };
   }

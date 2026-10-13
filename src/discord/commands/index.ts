@@ -1,5 +1,6 @@
 import { exportCommand } from './export.js';
 import { logCommand } from './log.js';
+import { monthCommand } from './month.js';
 import { todayCommand } from './today.js';
 import type { Command } from './types.js';
 import { undoCommand } from './undo.js';
@@ -10,6 +11,7 @@ export const commands: readonly Command[] = [
   undoCommand,
   todayCommand,
   weekCommand,
+  monthCommand,
   exportCommand,
 ];
 

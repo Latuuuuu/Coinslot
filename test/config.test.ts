@@ -33,3 +33,20 @@ describe('loadConfig', () => {
     expect(() => loadConfig({ ...base, DISCORD_TOKEN: undefined })).toThrow(/DISCORD_TOKEN/);
   });
 });
+
+describe('MONTHLY_REPORT', () => {
+  it('defaults to the 1st at 21:00 and parses custom values', () => {
+    expect(loadConfig(base).monthlyReport).toEqual({ day: 1, hour: 21, minute: 0 });
+    expect(loadConfig({ ...base, MONTHLY_REPORT: '28 09:30' }).monthlyReport).toEqual({
+      day: 28,
+      hour: 9,
+      minute: 30,
+    });
+  });
+
+  it('rejects days that do not exist in every month', () => {
+    expect(() => loadConfig({ ...base, MONTHLY_REPORT: '31 21:00' })).toThrow(/MONTHLY_REPORT/);
+    expect(() => loadConfig({ ...base, MONTHLY_REPORT: '0 21:00' })).toThrow(/MONTHLY_REPORT/);
+    expect(() => loadConfig({ ...base, MONTHLY_REPORT: '21:00' })).toThrow(/MONTHLY_REPORT/);
+  });
+});

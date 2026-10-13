@@ -5,11 +5,11 @@ import type { Command } from './types.js';
 export const logCommand: Command = {
   data: new SlashCommandBuilder()
     .setName('log')
-    .setDescription('Log an expense, e.g. 午餐 -120')
+    .setDescription('Log an entry, e.g. 午餐 -120 or 薪水 +500')
     .addStringOption((option) =>
       option
         .setName('text')
-        .setDescription('Keyword and amount, e.g. 午餐 -120')
+        .setDescription('Keyword and amount: 午餐 -120 (expense) or 薪水 +500 (income)')
         .setRequired(true)
         .setMaxLength(200),
     ),

@@ -7,6 +7,7 @@ import { log } from '../log.js';
 import { backupDatabase } from './backup.js';
 import { sendHeartbeat } from './heartbeat.js';
 import { channelNotifier } from './notify.js';
+import { runMonthlyReport } from './monthly.js';
 import { runReminder } from './reminder.js';
 import { runWeeklyReport } from './weekly.js';
 
@@ -27,7 +28,7 @@ export function startJobs(client: Client, ctx: AppContext, db: Database.Database
   const { config } = ctx;
   const tz = config.timezone;
   const notify = channelNotifier(client, config.ledgerChannelId);
-  const { reminderTime: r, weeklyReport: w } = config;
+  const { reminderTime: r, weeklyReport: w, monthlyReport: mo } = config;
 
   const jobs = [
     job('reminder', `${r.minute} ${r.hour} * * *`, tz, async () => {
@@ -38,6 +39,10 @@ export function startJobs(client: Client, ctx: AppContext, db: Database.Database
     job('weekly-report', `${w.minute} ${w.hour} * * ${w.weekday % 7}`, tz, async () => {
       await runWeeklyReport(ctx, notify);
       log.info('Weekly report sent');
+    }),
+    job('monthly-report', `${mo.minute} ${mo.hour} ${mo.day} * *`, tz, async () => {
+      await runMonthlyReport(ctx, notify);
+      log.info('Monthly report sent');
     }),
     job('backup', BACKUP_PATTERN, tz, async () => {
       const { file, pruned } = await backupDatabase(
