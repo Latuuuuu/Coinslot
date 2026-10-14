@@ -3,8 +3,8 @@ import { CalendarPage } from './components/CalendarPage';
 import { ChatPage } from './components/ChatPage';
 
 const PAGES = [
-  { id: 'calendar', label: '行事曆' },
   { id: 'chat', label: '聊天室' },
+  { id: 'calendar', label: '行事曆' },
 ] as const;
 
 /**
@@ -57,11 +57,11 @@ export function App() {
         </nav>
       </header>
       <main className="pager" ref={pagerRef}>
-        <section className="pager-page" aria-label="行事曆">
-          <CalendarPage version={version} onChanged={bump} />
-        </section>
         <section className="pager-page" aria-label="聊天室">
           <ChatPage onChanged={bump} />
+        </section>
+        <section className="pager-page" aria-label="行事曆">
+          <CalendarPage version={version} onChanged={bump} />
         </section>
       </main>
     </div>
